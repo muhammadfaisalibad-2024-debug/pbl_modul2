@@ -18,6 +18,9 @@ func main() {
 	api.Get("/students", getStudents)
 	api.Get("/students/:id", getStudent)
 	api.Post("/students", createStudent)
+	api.Put("/students/:id", updateStudent)
+	api.Patch("/students/:id", patchStudent)
+	api.Delete("/students/:id", deleteStudent)
 
 	fmt.Println("Server berjalan di http://localhost:3000")
 
