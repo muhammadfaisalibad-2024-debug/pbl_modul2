@@ -1,7 +1,9 @@
 package main
 
 import (
+	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -26,7 +28,104 @@ var students = []Student{
 var nextID = 3
 
 func getStudents(c *fiber.Ctx) error {
-	return sendSuccess(c, fiber.StatusOK, "Students retrieved successfully", students)
+	page := c.QueryInt("page", 1)
+	limit := c.QueryInt("limit", 10)
+
+	if page < 1 {
+		page = 1
+	}
+
+	if limit < 1 {
+		limit = 10
+	}
+
+	search := strings.ToLower(c.Query("search"))
+	sortBy := c.Query("sort", "id")
+	order := c.Query("order", "asc")
+	active := c.Query("is_active")
+
+	result := make([]Student, 0)
+
+	for _, student := range students {
+		if search != "" {
+			nameMatch := strings.Contains(
+				strings.ToLower(student.Name),
+				search,
+			)
+
+			nimMatch := strings.Contains(
+				strings.ToLower(student.NIM),
+				search,
+			)
+
+			if !nameMatch && !nimMatch {
+				continue
+			}
+		}
+
+		if active != "" {
+			isActive, err := strconv.ParseBool(active)
+
+			if err == nil && student.IsActive != isActive {
+				continue
+			}
+		}
+
+		result = append(result, student)
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		switch sortBy {
+		case "name":
+			if order == "desc" {
+				return result[i].Name > result[j].Name
+			}
+			return result[i].Name < result[j].Name
+
+		case "grade":
+			if order == "desc" {
+				return result[i].Grade > result[j].Grade
+			}
+			return result[i].Grade < result[j].Grade
+
+		default:
+			if order == "desc" {
+				return result[i].ID > result[j].ID
+			}
+			return result[i].ID < result[j].ID
+		}
+	})
+
+	total := len(result)
+
+	start := (page - 1) * limit
+	if start > total {
+		start = total
+	}
+
+	end := start + limit
+	if end > total {
+		end = total
+	}
+
+	paginated := result[start:end]
+
+	totalPages := 0
+	if total > 0 {
+		totalPages = (total + limit - 1) / limit
+	}
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"success": true,
+		"message": "Students retrieved successfully",
+		"data":    paginated,
+		"meta": fiber.Map{
+			"page":        page,
+			"limit":       limit,
+			"total":       total,
+			"total_pages": totalPages,
+		},
+	})
 }
 
 func getStudent(c *fiber.Ctx) error {
