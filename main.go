@@ -25,6 +25,20 @@ func main() {
 
 	app := fiber.New()
 
+	app.Get("/health", func(c *fiber.Ctx) error {
+		if err := db.Ping(c.Context()); err != nil {
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+				"success": false,
+				"message": "Database connection failed",
+			})
+		}
+
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"success": true,
+			"message": "Database connection is healthy",
+		})
+	})
+
 	app.Use(func(c *fiber.Ctx) error {
 		if c.Method() == fiber.MethodPost ||
 			c.Method() == fiber.MethodPut ||
