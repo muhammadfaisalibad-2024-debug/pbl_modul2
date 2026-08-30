@@ -2,13 +2,29 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"strings"
 
+	"api-students/config"
+
 	"github.com/gofiber/fiber/v2"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+var db *pgxpool.Pool
+
 func main() {
+	cfg := config.Load()
+
+	var err error
+	db, err = config.NewDBPool(cfg)
+	if err != nil {
+		log.Fatal("Database connection failed:", err)
+	}
+	defer db.Close()
+
 	app := fiber.New()
+
 	app.Use(func(c *fiber.Ctx) error {
 		if c.Method() == fiber.MethodPost ||
 			c.Method() == fiber.MethodPut ||
