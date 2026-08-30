@@ -1,31 +1,13 @@
 package main
 
 import (
-	"sort"
+	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/jackc/pgx/v5"
 )
-
-var students = []Student{
-	{
-		ID:       1,
-		NIM:      "0123456789",
-		Name:     "Faisal",
-		Grade:    90,
-		IsActive: true,
-	},
-	{
-		ID:       2,
-		NIM:      "0123456788",
-		Name:     "Budi",
-		Grade:    85,
-		IsActive: true,
-	},
-}
-
-var nextID = 3
 
 func getStudents(c *fiber.Ctx) error {
 	page := c.QueryInt("page", 1)
@@ -41,76 +23,125 @@ func getStudents(c *fiber.Ctx) error {
 
 	search := strings.ToLower(c.Query("search"))
 	sortBy := c.Query("sort", "id")
-	order := c.Query("order", "asc")
+	order := strings.ToLower(c.Query("order", "asc"))
 	active := c.Query("is_active")
+
+	sortColumns := map[string]string{
+		"id":    "id",
+		"name":  "name",
+		"grade": "grade",
+	}
+
+	sortColumn, ok := sortColumns[sortBy]
+	if !ok {
+		sortColumn = "id"
+	}
+
+	if order != "desc" {
+		order = "asc"
+	}
+
+	offset := (page - 1) * limit
+
+	where := []string{"1=1"}
+	args := []interface{}{}
+	argNumber := 1
+
+	if search != "" {
+		where = append(
+			where,
+			fmt.Sprintf(
+				"(LOWER(name) LIKE $%d OR LOWER(nim) LIKE $%d)",
+				argNumber,
+				argNumber,
+			),
+		)
+		args = append(args, "%"+search+"%")
+		argNumber++
+	}
+
+	if active != "" {
+		isActive, err := strconv.ParseBool(active)
+
+		if err == nil {
+			where = append(
+				where,
+				fmt.Sprintf("is_active = $%d", argNumber),
+			)
+			args = append(args, isActive)
+			argNumber++
+		}
+	}
+
+	whereClause := strings.Join(where, " AND ")
+
+	countQuery := fmt.Sprintf(
+		"SELECT COUNT(*) FROM students WHERE %s",
+		whereClause,
+	)
+
+	var total int
+
+	if err := db.QueryRow(c.Context(), countQuery, args...).Scan(&total); err != nil {
+		return sendError(
+			c,
+			fiber.StatusInternalServerError,
+			"Failed to retrieve students",
+		)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT id, nim, name, grade, is_active
+		FROM students
+		WHERE %s
+		ORDER BY %s %s
+		LIMIT $%d OFFSET $%d
+	`, whereClause, sortColumn, order, argNumber, argNumber+1)
+
+	args = append(args, limit, offset)
+
+	rows, err := db.Query(c.Context(), query, args...)
+	if err != nil {
+		return sendError(
+			c,
+			fiber.StatusInternalServerError,
+			"Failed to retrieve students",
+		)
+	}
+	defer rows.Close()
 
 	result := make([]Student, 0)
 
-	for _, student := range students {
-		if search != "" {
-			nameMatch := strings.Contains(
-				strings.ToLower(student.Name),
-				search,
+	for rows.Next() {
+		var student Student
+
+		if err := rows.Scan(
+			&student.ID,
+			&student.NIM,
+			&student.Name,
+			&student.Grade,
+			&student.IsActive,
+		); err != nil {
+			return sendError(
+				c,
+				fiber.StatusInternalServerError,
+				"Failed to read student data",
 			)
-
-			nimMatch := strings.Contains(
-				strings.ToLower(student.NIM),
-				search,
-			)
-
-			if !nameMatch && !nimMatch {
-				continue
-			}
-		}
-
-		if active != "" {
-			isActive, err := strconv.ParseBool(active)
-
-			if err == nil && student.IsActive != isActive {
-				continue
-			}
 		}
 
 		result = append(result, student)
 	}
 
-	sort.Slice(result, func(i, j int) bool {
-		switch sortBy {
-		case "name":
-			if order == "desc" {
-				return result[i].Name > result[j].Name
-			}
-			return result[i].Name < result[j].Name
-
-		case "grade":
-			if order == "desc" {
-				return result[i].Grade > result[j].Grade
-			}
-			return result[i].Grade < result[j].Grade
-
-		default:
-			if order == "desc" {
-				return result[i].ID > result[j].ID
-			}
-			return result[i].ID < result[j].ID
-		}
-	})
-
-	total := len(result)
-
-	start := (page - 1) * limit
-	if start > total {
-		start = total
+	if err := rows.Err(); err != nil {
+		return sendError(
+			c,
+			fiber.StatusInternalServerError,
+			"Failed to read student data",
+		)
 	}
-
-	end := start + limit
-	if end > total {
-		end = total
-	}
-
-	paginated := result[start:end]
 
 	totalPages := 0
+
 	if total > 0 {
 		totalPages = (total + limit - 1) / limit
 	}
@@ -118,7 +149,7 @@ func getStudents(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"success": true,
 		"message": "Students retrieved successfully",
-		"data":    paginated,
+		"data":    result,
 		"meta": fiber.Map{
 			"page":        page,
 			"limit":       limit,
@@ -135,13 +166,40 @@ func getStudent(c *fiber.Ctx) error {
 		return sendError(c, fiber.StatusBadRequest, "Invalid student ID")
 	}
 
-	for _, student := range students {
-		if student.ID == id {
-			return sendSuccess(c, fiber.StatusOK, "Student retrieved successfully", student)
-		}
+	var student Student
+
+	err = db.QueryRow(
+		c.Context(),
+		`SELECT id, nim, name, grade, is_active
+		 FROM students
+		 WHERE id = $1`,
+		id,
+	).Scan(
+		&student.ID,
+		&student.NIM,
+		&student.Name,
+		&student.Grade,
+		&student.IsActive,
+	)
+
+	if err == pgx.ErrNoRows {
+		return sendError(c, fiber.StatusNotFound, "Student not found")
 	}
 
-	return sendError(c, fiber.StatusNotFound, "Student not found")
+	if err != nil {
+		return sendError(
+			c,
+			fiber.StatusInternalServerError,
+			"Failed to retrieve student",
+		)
+	}
+
+	return sendSuccess(
+		c,
+		fiber.StatusOK,
+		"Student retrieved successfully",
+		student,
+	)
 }
 
 func createStudent(c *fiber.Ctx) error {
@@ -152,25 +210,43 @@ func createStudent(c *fiber.Ctx) error {
 	}
 
 	if request.NIM == "" || request.Name == "" {
-		return sendError(c, fiber.StatusUnprocessableEntity, "NIM and Name are required")
+		return sendError(
+			c,
+			fiber.StatusUnprocessableEntity,
+			"NIM and Name are required",
+		)
 	}
 
-	for _, student := range students {
-		if student.NIM == request.NIM {
+	var student Student
+
+	err := db.QueryRow(
+		c.Context(),
+		`INSERT INTO students (nim, name, grade, is_active)
+		 VALUES ($1, $2, $3, $4)
+		 RETURNING id, nim, name, grade, is_active`,
+		request.NIM,
+		request.Name,
+		request.Grade,
+		request.IsActive,
+	).Scan(
+		&student.ID,
+		&student.NIM,
+		&student.Name,
+		&student.Grade,
+		&student.IsActive,
+	)
+
+	if err != nil {
+		if strings.Contains(err.Error(), "students_nim_key") {
 			return sendError(c, fiber.StatusConflict, "NIM already exists")
 		}
-	}
 
-	student := Student{
-		ID:       nextID,
-		NIM:      request.NIM,
-		Name:     request.Name,
-		Grade:    request.Grade,
-		IsActive: request.IsActive,
+		return sendError(
+			c,
+			fiber.StatusInternalServerError,
+			"Failed to create student",
+		)
 	}
-
-	students = append(students, student)
-	nextID++
 
 	c.Location("/api/v1/students/" + strconv.Itoa(student.ID))
 
@@ -203,34 +279,52 @@ func updateStudent(c *fiber.Ctx) error {
 		)
 	}
 
-	for i := range students {
-		if students[i].ID == id {
+	var student Student
 
-			for _, student := range students {
-				if student.ID != id && student.NIM == request.NIM {
-					return sendError(
-						c,
-						fiber.StatusConflict,
-						"NIM already exists",
-					)
-				}
-			}
+	err = db.QueryRow(
+		c.Context(),
+		`UPDATE students
+		 SET nim = $1,
+		     name = $2,
+		     grade = $3,
+		     is_active = $4
+		 WHERE id = $5
+		 RETURNING id, nim, name, grade, is_active`,
+		request.NIM,
+		request.Name,
+		request.Grade,
+		request.IsActive,
+		id,
+	).Scan(
+		&student.ID,
+		&student.NIM,
+		&student.Name,
+		&student.Grade,
+		&student.IsActive,
+	)
 
-			students[i].NIM = request.NIM
-			students[i].Name = request.Name
-			students[i].Grade = request.Grade
-			students[i].IsActive = request.IsActive
-
-			return sendSuccess(
-				c,
-				fiber.StatusOK,
-				"Student updated successfully",
-				students[i],
-			)
-		}
+	if err == pgx.ErrNoRows {
+		return sendError(c, fiber.StatusNotFound, "Student not found")
 	}
 
-	return sendError(c, fiber.StatusNotFound, "Student not found")
+	if err != nil {
+		if strings.Contains(err.Error(), "students_nim_key") {
+			return sendError(c, fiber.StatusConflict, "NIM already exists")
+		}
+
+		return sendError(
+			c,
+			fiber.StatusInternalServerError,
+			"Failed to update student",
+		)
+	}
+
+	return sendSuccess(
+		c,
+		fiber.StatusOK,
+		"Student updated successfully",
+		student,
+	)
 }
 
 func patchStudent(c *fiber.Ctx) error {
@@ -246,45 +340,90 @@ func patchStudent(c *fiber.Ctx) error {
 		return sendError(c, fiber.StatusBadRequest, "Invalid JSON body")
 	}
 
-	for i := range students {
-		if students[i].ID == id {
+	setParts := []string{}
+	args := []interface{}{}
+	argNumber := 1
 
-			if request.NIM != nil {
-				for _, student := range students {
-					if student.ID != id && student.NIM == *request.NIM {
-						return sendError(
-							c,
-							fiber.StatusConflict,
-							"NIM already exists",
-						)
-					}
-				}
-
-				students[i].NIM = *request.NIM
-			}
-
-			if request.Name != nil {
-				students[i].Name = *request.Name
-			}
-
-			if request.Grade != nil {
-				students[i].Grade = *request.Grade
-			}
-
-			if request.IsActive != nil {
-				students[i].IsActive = *request.IsActive
-			}
-
-			return sendSuccess(
-				c,
-				fiber.StatusOK,
-				"Student patched successfully",
-				students[i],
-			)
-		}
+	if request.NIM != nil {
+		setParts = append(setParts, fmt.Sprintf("nim = $%d", argNumber))
+		args = append(args, *request.NIM)
+		argNumber++
 	}
 
-	return sendError(c, fiber.StatusNotFound, "Student not found")
+	if request.Name != nil {
+		setParts = append(setParts, fmt.Sprintf("name = $%d", argNumber))
+		args = append(args, *request.Name)
+		argNumber++
+	}
+
+	if request.Grade != nil {
+		setParts = append(setParts, fmt.Sprintf("grade = $%d", argNumber))
+		args = append(args, *request.Grade)
+		argNumber++
+	}
+
+	if request.IsActive != nil {
+		setParts = append(
+			setParts,
+			fmt.Sprintf("is_active = $%d", argNumber),
+		)
+		args = append(args, *request.IsActive)
+		argNumber++
+	}
+
+	if len(setParts) == 0 {
+		return sendError(
+			c,
+			fiber.StatusUnprocessableEntity,
+			"No fields to update",
+		)
+	}
+
+	args = append(args, id)
+
+	query := fmt.Sprintf(`
+		UPDATE students
+		SET %s
+		WHERE id = $%d
+		RETURNING id, nim, name, grade, is_active
+	`, strings.Join(setParts, ", "), argNumber)
+
+	var student Student
+
+	err = db.QueryRow(
+		c.Context(),
+		query,
+		args...,
+	).Scan(
+		&student.ID,
+		&student.NIM,
+		&student.Name,
+		&student.Grade,
+		&student.IsActive,
+	)
+
+	if err == pgx.ErrNoRows {
+		return sendError(c, fiber.StatusNotFound, "Student not found")
+	}
+
+	if err != nil {
+		if strings.Contains(err.Error(), "students_nim_key") {
+			return sendError(c, fiber.StatusConflict, "NIM already exists")
+		}
+
+		return sendError(
+			c,
+			fiber.StatusInternalServerError,
+			"Failed to patch student",
+		)
+	}
+
+	return sendSuccess(
+		c,
+		fiber.StatusOK,
+		"Student patched successfully",
+		student,
+	)
 }
 
 func deleteStudent(c *fiber.Ctx) error {
@@ -294,17 +433,23 @@ func deleteStudent(c *fiber.Ctx) error {
 		return sendError(c, fiber.StatusBadRequest, "Invalid student ID")
 	}
 
-	for i, student := range students {
-		if student.ID == id {
+	result, err := db.Exec(
+		c.Context(),
+		"DELETE FROM students WHERE id = $1",
+		id,
+	)
 
-			students = append(
-				students[:i],
-				students[i+1:]...,
-			)
-
-			return c.SendStatus(fiber.StatusNoContent)
-		}
+	if err != nil {
+		return sendError(
+			c,
+			fiber.StatusInternalServerError,
+			"Failed to delete student",
+		)
 	}
 
-	return sendError(c, fiber.StatusNotFound, "Student not found")
+	if result.RowsAffected() == 0 {
+		return sendError(c, fiber.StatusNotFound, "Student not found")
+	}
+
+	return c.SendStatus(fiber.StatusNoContent)
 }
