@@ -1,76 +1,63 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
-	"strings"
+	"os"
+	"os/signal"
+	"syscall"
 
+	"api-students/app/repository"
+	"api-students/app/service"
 	"api-students/config"
-
-	"github.com/gofiber/fiber/v2"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"api-students/database"
 )
 
-var db *pgxpool.Pool
-
 func main() {
+	// 1. Load env
 	cfg := config.Load()
 
-	var err error
-	db, err = config.NewDBPool(cfg)
+	// 2. Create logger
+	logger := config.NewLogger()
+
+	// 3. Create database pool
+	db, err := database.NewDBPool(cfg)
 	if err != nil {
 		log.Fatal("Database connection failed:", err)
 	}
 	defer db.Close()
 
-	app := fiber.New()
+	// 4. Create repository
+	repo := repository.NewStudentRepository(db)
 
-	app.Get("/health", func(c *fiber.Ctx) error {
-		if err := db.Ping(c.Context()); err != nil {
-			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
-				"success": false,
-				"message": "Database connection failed",
-			})
+	// 5. Create service
+	svc := service.NewStudentService(repo)
+
+	// 6. Create Fiber app
+	app := config.NewApp(db, svc, logger)
+
+	// 7. Run server (graceful shutdown)
+	port := cfg.AppPort
+	if port == "" {
+		port = "3000"
+	}
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		fmt.Printf("Server berjalan di http://localhost:%s\n", port)
+		if err := app.Listen(":" + port); err != nil {
+			log.Fatalf("Server error: %v", err)
 		}
+	}()
 
-		return c.Status(fiber.StatusOK).JSON(fiber.Map{
-			"success": true,
-			"message": "Database connection is healthy",
-		})
-	})
-
-	app.Use(func(c *fiber.Ctx) error {
-		if c.Method() == fiber.MethodPost ||
-			c.Method() == fiber.MethodPut ||
-			c.Method() == fiber.MethodPatch {
-
-			contentType := c.Get("Content-Type")
-
-			if !strings.HasPrefix(contentType, fiber.MIMEApplicationJSON) {
-				return c.Status(fiber.StatusUnsupportedMediaType).JSON(fiber.Map{
-					"success": false,
-					"message": "Content-Type must be application/json",
-				})
-			}
-		}
-
-		return c.Next()
-	})
-
-	app.Get("/", func(c *fiber.Ctx) error {
-		return c.SendString("API Students")
-	})
-
-	api := app.Group("/api/v1")
-
-	api.Get("/students", getStudents)
-	api.Get("/students/:id", getStudent)
-	api.Post("/students", createStudent)
-	api.Put("/students/:id", updateStudent)
-	api.Patch("/students/:id", patchStudent)
-	api.Delete("/students/:id", deleteStudent)
-
-	fmt.Println("Server berjalan di http://localhost:3000")
-
-	app.Listen(":3000")
+	// 8. Graceful shutdown on signal
+	<-quit
+	log.Println("Shutting down server...")
+	if err := app.ShutdownWithContext(context.Background()); err != nil {
+		log.Fatalf("Server shutdown error: %v", err)
+	}
+	log.Println("Server stopped.")
 }
