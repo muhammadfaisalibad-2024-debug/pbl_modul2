@@ -1,14 +1,16 @@
-package config
+package database
 
 import (
 	"context"
 	"fmt"
 	"time"
 
+	"api-students/config"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func NewDBPool(cfg Config) (*pgxpool.Pool, error) {
+func NewDBPool(cfg config.Config) (*pgxpool.Pool, error) {
 	dsn := fmt.Sprintf(
 		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
 		cfg.DBHost,
@@ -24,7 +26,7 @@ func NewDBPool(cfg Config) (*pgxpool.Pool, error) {
 		return nil, err
 	}
 
-	poolConfig.MaxConns = int32(10)
+	poolConfig.MaxConns = 10
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
