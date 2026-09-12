@@ -6,12 +6,15 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
+	"time"
 
 	"api-students/app/repository"
 	"api-students/app/service"
 	"api-students/config"
 	"api-students/database"
+	"api-students/helper"
 )
 
 func main() {
@@ -21,43 +24,111 @@ func main() {
 	// 2. Create logger
 	logger := config.NewLogger()
 
-	// 3. Create database pool
+	// 3. Validate JWT secret
+	if len(cfg.JWTSecret) < 32 {
+		log.Fatal("JWT_SECRET harus diisi minimal 32 karakter")
+	}
+
+	// 4. Create database pool
 	db, err := database.NewDBPool(cfg)
 	if err != nil {
 		log.Fatal("Database connection failed:", err)
 	}
 	defer db.Close()
 
-	// 4. Create repository
-	repo := repository.NewStudentRepository(db)
+	// ==============================
+	// JWT CONFIG
+	// ==============================
 
-	// 5. Create service
-	svc := service.NewStudentService(repo)
+	accessMinutes, err := strconv.Atoi(cfg.JWTAccessTTLMinutes)
+	if err != nil || accessMinutes <= 0 {
+		accessMinutes = 15
+	}
 
-	// 6. Create Fiber app
-	app := config.NewApp(db, svc, logger)
+	refreshDays, err := strconv.Atoi(cfg.JWTRefreshTTLDays)
+	if err != nil || refreshDays <= 0 {
+		refreshDays = 7
+	}
 
-	// 7. Run server (graceful shutdown)
+	jwtManager := helper.NewJWTManager(
+		cfg.JWTSecret,
+		cfg.JWTIssuer,
+		time.Duration(accessMinutes)*time.Minute,
+	)
+
+	// ==============================
+	// REPOSITORIES
+	// ==============================
+
+	studentRepo := repository.NewStudentRepository(db)
+	userRepo := repository.NewUserRepository(db)
+	tokenRepo := repository.NewTokenRepository(db)
+
+	// ==============================
+	// SERVICES
+	// ==============================
+
+	studentService := service.NewStudentService(studentRepo)
+
+	authService := service.NewAuthService(
+		userRepo,
+		tokenRepo,
+		jwtManager,
+		time.Duration(refreshDays)*24*time.Hour,
+	)
+
+	// ==============================
+	// FIBER APP
+	// ==============================
+
+	app := config.NewApp(
+		db,
+		studentService,
+		authService,
+		jwtManager,
+		logger,
+	)
+
+	// ==============================
+	// RUN SERVER
+	// ==============================
+
 	port := cfg.AppPort
 	if port == "" {
 		port = "3000"
 	}
 
 	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(
+		quit,
+		os.Interrupt,
+		syscall.SIGTERM,
+	)
 
 	go func() {
-		fmt.Printf("Server berjalan di http://localhost:%s\n", port)
+		fmt.Printf(
+			"Server berjalan di http://localhost:%s\n",
+			port,
+		)
+
 		if err := app.Listen(":" + port); err != nil {
 			log.Fatalf("Server error: %v", err)
 		}
 	}()
 
-	// 8. Graceful shutdown on signal
+	// Graceful shutdown
 	<-quit
+
 	log.Println("Shutting down server...")
-	if err := app.ShutdownWithContext(context.Background()); err != nil {
-		log.Fatalf("Server shutdown error: %v", err)
+
+	if err := app.ShutdownWithContext(
+		context.Background(),
+	); err != nil {
+		log.Fatalf(
+			"Server shutdown error: %v",
+			err,
+		)
 	}
+
 	log.Println("Server stopped.")
 }

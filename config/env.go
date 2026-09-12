@@ -8,7 +8,8 @@ import (
 )
 
 type Config struct {
-	AppPort    string
+	AppPort string
+
 	DBHost     string
 	DBPort     string
 	DBUser     string
@@ -16,6 +17,12 @@ type Config struct {
 	DBName     string
 	DBSSLMode  string
 	DBMaxConns string
+
+	JWTSecret           string
+	JWTIssuer           string
+	JWTAccessTTLMinutes string
+	JWTRefreshTTLDays   string
+	AllowedOrigins      string
 }
 
 func Load() Config {
@@ -24,7 +31,8 @@ func Load() Config {
 	}
 
 	return Config{
-		AppPort:    os.Getenv("APP_PORT"),
+		AppPort: os.Getenv("APP_PORT"),
+
 		DBHost:     os.Getenv("DB_HOST"),
 		DBPort:     os.Getenv("DB_PORT"),
 		DBUser:     os.Getenv("DB_USER"),
@@ -32,5 +40,11 @@ func Load() Config {
 		DBName:     os.Getenv("DB_NAME"),
 		DBSSLMode:  os.Getenv("DB_SSLMODE"),
 		DBMaxConns: os.Getenv("DB_MAX_CONNS"),
+
+		JWTSecret:           os.Getenv("JWT_SECRET"),
+		JWTIssuer:           os.Getenv("JWT_ISSUER"),
+		JWTAccessTTLMinutes: os.Getenv("JWT_ACCESS_TTL_MINUTES"),
+		JWTRefreshTTLDays:   os.Getenv("JWT_REFRESH_TTL_DAYS"),
+		AllowedOrigins:      os.Getenv("ALLOWED_ORIGINS"),
 	}
 }
