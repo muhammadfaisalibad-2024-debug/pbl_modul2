@@ -2,13 +2,21 @@ package route
 
 import (
 	"api-students/app/service"
+	"api-students/helper"
+	"api-students/middleware"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func RegisterRoutes(app *fiber.App, db *pgxpool.Pool, svc *service.StudentService) {
-	// Health check
+func RegisterRoutes(
+	app *fiber.App,
+	db *pgxpool.Pool,
+	studentService *service.StudentService,
+	authService *service.AuthService,
+	jwtManager *helper.JWTManager,
+) {
+	// Health check - public
 	app.Get("/health", func(c *fiber.Ctx) error {
 		if err := db.Ping(c.Context()); err != nil {
 			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
@@ -16,22 +24,94 @@ func RegisterRoutes(app *fiber.App, db *pgxpool.Pool, svc *service.StudentServic
 				"message": "Database connection failed",
 			})
 		}
+
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
 			"success": true,
 			"message": "Database connection is healthy",
 		})
 	})
 
+	// Root endpoint - public
 	app.Get("/", func(c *fiber.Ctx) error {
 		return c.SendString("API Students")
 	})
 
 	api := app.Group("/api/v1")
 
-	api.Get("/students", svc.GetStudents)
-	api.Get("/students/:id", svc.GetStudent)
-	api.Post("/students", svc.CreateStudent)
-	api.Put("/students/:id", svc.UpdateStudent)
-	api.Patch("/students/:id", svc.PatchStudent)
-	api.Delete("/students/:id", svc.DeleteStudent)
+	// =========================
+	// AUTHENTICATION
+	// =========================
+	auth := api.Group("/auth")
+
+	auth.Post(
+		"/register",
+		middleware.RequireJSON(),
+		authService.Register,
+	)
+
+	auth.Post(
+		"/login",
+		middleware.RequireJSON(),
+		middleware.LoginRateLimiter(),
+		authService.Login,
+	)
+
+	auth.Post(
+		"/refresh",
+		middleware.RequireJSON(),
+		authService.Refresh,
+	)
+
+	auth.Post(
+		"/logout",
+		middleware.RequireJSON(),
+		authService.Logout,
+	)
+
+	auth.Get(
+		"/me",
+		middleware.RequireAuth(jwtManager),
+		authService.Me,
+	)
+
+	// =========================
+	// STUDENTS - PROTECTED
+	// =========================
+	students := api.Group(
+		"/students",
+		middleware.RequireAuth(jwtManager),
+	)
+
+	students.Get(
+		"/",
+		studentService.GetStudents,
+	)
+
+	students.Get(
+		"/:id",
+		studentService.GetStudent,
+	)
+
+	students.Post(
+		"/",
+		middleware.RequireJSON(),
+		studentService.CreateStudent,
+	)
+
+	students.Put(
+		"/:id",
+		middleware.RequireJSON(),
+		studentService.UpdateStudent,
+	)
+
+	students.Patch(
+		"/:id",
+		middleware.RequireJSON(),
+		studentService.PatchStudent,
+	)
+
+	students.Delete(
+		"/:id",
+		studentService.DeleteStudent,
+	)
 }
