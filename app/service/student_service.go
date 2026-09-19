@@ -99,7 +99,7 @@ func (s *StudentService) UpdateStudent(c *fiber.Ctx) error {
 	if err != nil {
 		return helper.Fail(c, fiber.StatusBadRequest, "Invalid student ID")
 	}
-	if err := s.authorizeStudentUpdate(c, id); err != nil {
+	if _, err := s.authorizeStudentUpdate(c, id); err != nil {
 		return err
 	}
 
@@ -131,7 +131,7 @@ func (s *StudentService) PatchStudent(c *fiber.Ctx) error {
 	if err != nil {
 		return helper.Fail(c, fiber.StatusBadRequest, "Invalid student ID")
 	}
-	if err := s.authorizeStudentUpdate(c, id); err != nil {
+	if _, err := s.authorizeStudentUpdate(c, id); err != nil {
 		return err
 	}
 
@@ -180,20 +180,20 @@ func (s *StudentService) DeleteStudent(c *fiber.Ctx) error {
 	return helper.NoContent(c)
 }
 
-func (s *StudentService) authorizeStudentUpdate(c *fiber.Ctx, id int) error {
+func (s *StudentService) authorizeStudentUpdate(c *fiber.Ctx, id int) (model.Student, error) {
 	current, ok := helper.CurrentUser(c)
 	if !ok {
-		return helper.Fail(c, fiber.StatusUnauthorized, "belum terautentikasi")
+		return model.Student{}, helper.Fail(c, fiber.StatusUnauthorized, "belum terautentikasi")
 	}
-	student, err := s.repo.FindByID(c.Context(), id)
+	existingStudent, err := s.repo.FindByID(c.Context(), id)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return helper.Fail(c, fiber.StatusNotFound, "Student not found")
+			return model.Student{}, helper.Fail(c, fiber.StatusNotFound, "Student not found")
 		}
-		return helper.Fail(c, fiber.StatusInternalServerError, "Failed to retrieve student")
+		return model.Student{}, helper.Fail(c, fiber.StatusInternalServerError, "Failed to retrieve student")
 	}
-	if !CanAccessStudent(current, student.OwnerID, s.perms, "student:update:any") {
-		return helper.Fail(c, fiber.StatusForbidden, "tidak berhak mengubah data student ini")
+	if !CanAccessStudent(current, existingStudent.OwnerID, s.perms, "student:update:any") {
+		return model.Student{}, helper.Fail(c, fiber.StatusForbidden, "tidak berhak mengubah data student ini")
 	}
-	return nil
+	return existingStudent, nil
 }
