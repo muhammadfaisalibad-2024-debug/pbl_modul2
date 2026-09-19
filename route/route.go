@@ -14,7 +14,9 @@ func RegisterRoutes(
 	db *pgxpool.Pool,
 	studentService *service.StudentService,
 	authService *service.AuthService,
+	userService *service.UserService,
 	jwtManager *helper.JWTManager,
+	perms *helper.PermissionSet,
 ) {
 	// Health check - public
 	app.Get("/health", func(c *fiber.Ctx) error {
@@ -74,6 +76,18 @@ func RegisterRoutes(
 		authService.Me,
 	)
 
+	users := api.Group(
+		"/users",
+		middleware.RequireAuth(jwtManager),
+	)
+
+	users.Get("/", middleware.RequirePermission(perms, "user:list"), userService.List)
+	users.Get("/:id", userService.Get)
+	users.Put("/:id", middleware.RequireJSON(), userService.Replace)
+	users.Patch("/:id", middleware.RequireJSON(), userService.Patch)
+	users.Delete("/:id", middleware.RequirePermission(perms, "user:delete"), userService.Delete)
+	users.Patch("/:id/role", middleware.RequireJSON(), middleware.RequirePermission(perms, "role:assign"), userService.AssignRole)
+
 	// =========================
 	// STUDENTS - PROTECTED
 	// =========================
@@ -84,6 +98,7 @@ func RegisterRoutes(
 
 	students.Get(
 		"/",
+		middleware.RequirePermission(perms, "student:list"),
 		studentService.GetStudents,
 	)
 
@@ -95,6 +110,7 @@ func RegisterRoutes(
 	students.Post(
 		"/",
 		middleware.RequireJSON(),
+		middleware.RequirePermission(perms, "student:create"),
 		studentService.CreateStudent,
 	)
 
@@ -112,6 +128,7 @@ func RegisterRoutes(
 
 	students.Delete(
 		"/:id",
+		middleware.RequirePermission(perms, "student:delete"),
 		studentService.DeleteStudent,
 	)
 }

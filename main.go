@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strconv"
@@ -63,17 +64,28 @@ func main() {
 	studentRepo := repository.NewStudentRepository(db)
 	userRepo := repository.NewUserRepository(db)
 	tokenRepo := repository.NewTokenRepository(db)
+	roleRepo := repository.NewRoleRepository(db)
+
+	rawPermissions, err := roleRepo.LoadPermissions(context.Background())
+	if err != nil {
+		logger.Error("gagal memuat permission", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	permissions := helper.NewPermissionSet(rawPermissions)
+	logger.Info("permission dimuat", slog.Any("roles", permissions.KnownRoles()))
 
 	// ==============================
 	// SERVICES
 	// ==============================
 
-	studentService := service.NewStudentService(studentRepo)
+	studentService := service.NewStudentService(studentRepo, permissions)
+	userService := service.NewUserService(userRepo, permissions)
 
 	authService := service.NewAuthService(
 		userRepo,
 		tokenRepo,
 		jwtManager,
+		permissions,
 		time.Duration(refreshDays)*24*time.Hour,
 	)
 
@@ -85,7 +97,9 @@ func main() {
 		db,
 		studentService,
 		authService,
+		userService,
 		jwtManager,
+		permissions,
 		logger,
 	)
 

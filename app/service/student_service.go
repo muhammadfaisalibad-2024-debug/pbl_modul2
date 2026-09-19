@@ -13,11 +13,12 @@ import (
 )
 
 type StudentService struct {
-	repo repository.StudentRepository
+	repo  repository.StudentRepository
+	perms *helper.PermissionSet
 }
 
-func NewStudentService(repo repository.StudentRepository) *StudentService {
-	return &StudentService{repo: repo}
+func NewStudentService(repo repository.StudentRepository, perms *helper.PermissionSet) *StudentService {
+	return &StudentService{repo: repo, perms: perms}
 }
 
 func (s *StudentService) GetStudents(c *fiber.Ctx) error {
@@ -55,11 +56,22 @@ func (s *StudentService) GetStudent(c *fiber.Ctx) error {
 		}
 		return helper.Fail(c, fiber.StatusInternalServerError, "Failed to retrieve student")
 	}
+	current, ok := helper.CurrentUser(c)
+	if !ok {
+		return helper.Fail(c, fiber.StatusUnauthorized, "belum terautentikasi")
+	}
+	if !CanAccessStudent(current, student.OwnerID, s.perms, "student:read:any") {
+		return helper.Fail(c, fiber.StatusForbidden, "tidak berhak mengakses data student ini")
+	}
 
 	return helper.Success(c, fiber.StatusOK, "Student retrieved successfully", student)
 }
 
 func (s *StudentService) CreateStudent(c *fiber.Ctx) error {
+	current, ok := helper.CurrentUser(c)
+	if !ok {
+		return helper.Fail(c, fiber.StatusUnauthorized, "belum terautentikasi")
+	}
 	var req model.CreateStudentRequest
 
 	if err := c.BodyParser(&req); err != nil {
@@ -70,7 +82,7 @@ func (s *StudentService) CreateStudent(c *fiber.Ctx) error {
 		return helper.Fail(c, fiber.StatusUnprocessableEntity, "NIM and Name are required")
 	}
 
-	student, err := s.repo.Create(c.Context(), &req)
+	student, err := s.repo.Create(c.Context(), &req, current.UserID)
 	if err != nil {
 		if errors.Is(err, repository.ErrDuplicate) {
 			return helper.Fail(c, fiber.StatusConflict, "NIM already exists")
@@ -86,6 +98,9 @@ func (s *StudentService) UpdateStudent(c *fiber.Ctx) error {
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
 		return helper.Fail(c, fiber.StatusBadRequest, "Invalid student ID")
+	}
+	if err := s.authorizeStudentUpdate(c, id); err != nil {
+		return err
 	}
 
 	var req model.ReplaceStudentRequest
@@ -115,6 +130,9 @@ func (s *StudentService) PatchStudent(c *fiber.Ctx) error {
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
 		return helper.Fail(c, fiber.StatusBadRequest, "Invalid student ID")
+	}
+	if err := s.authorizeStudentUpdate(c, id); err != nil {
+		return err
 	}
 
 	var req model.PatchStudentRequest
@@ -160,4 +178,22 @@ func (s *StudentService) DeleteStudent(c *fiber.Ctx) error {
 	}
 
 	return helper.NoContent(c)
+}
+
+func (s *StudentService) authorizeStudentUpdate(c *fiber.Ctx, id int) error {
+	current, ok := helper.CurrentUser(c)
+	if !ok {
+		return helper.Fail(c, fiber.StatusUnauthorized, "belum terautentikasi")
+	}
+	student, err := s.repo.FindByID(c.Context(), id)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return helper.Fail(c, fiber.StatusNotFound, "Student not found")
+		}
+		return helper.Fail(c, fiber.StatusInternalServerError, "Failed to retrieve student")
+	}
+	if !CanAccessStudent(current, student.OwnerID, s.perms, "student:update:any") {
+		return helper.Fail(c, fiber.StatusForbidden, "tidak berhak mengubah data student ini")
+	}
+	return nil
 }

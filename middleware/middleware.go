@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"api-students/helper"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/helmet"
@@ -35,14 +37,19 @@ func RequestLogger(logger *slog.Logger) fiber.Handler {
 			reqID = ""
 		}
 
-		logger.Info("Incoming Request",
+		attrs := []any{
 			slog.String("request_id", reqID.(string)),
 			slog.String("method", c.Method()),
 			slog.String("path", c.Path()),
 			slog.Int("status", c.Response().StatusCode()),
 			slog.String("duration", duration.String()),
 			slog.String("ip", c.IP()),
-		)
+		}
+		if user, ok := helper.CurrentUser(c); ok {
+			attrs = append(attrs, slog.Int("user_id", user.UserID), slog.String("role", user.Role))
+		}
+
+		logger.Info("http_request", attrs...)
 
 		return err
 	}

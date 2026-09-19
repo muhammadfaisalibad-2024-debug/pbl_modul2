@@ -16,7 +16,9 @@ func NewApp(
 	db *pgxpool.Pool,
 	studentService *service.StudentService,
 	authService *service.AuthService,
+	userService *service.UserService,
 	jwtManager *helper.JWTManager,
+	permissions *helper.PermissionSet,
 	logger *slog.Logger,
 ) *fiber.App {
 
@@ -44,7 +46,9 @@ func NewApp(
 		db,
 		studentService,
 		authService,
+		userService,
 		jwtManager,
+		permissions,
 	)
 
 	return app

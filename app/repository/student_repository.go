@@ -21,7 +21,7 @@ var (
 type StudentRepository interface {
 	FindAll(ctx context.Context, page, limit int, search, sortBy, order, active string) ([]model.Student, int, error)
 	FindByID(ctx context.Context, id int) (model.Student, error)
-	Create(ctx context.Context, req *model.CreateStudentRequest) (model.Student, error)
+	Create(ctx context.Context, req *model.CreateStudentRequest, ownerID int) (model.Student, error)
 	Update(ctx context.Context, id int, req *model.ReplaceStudentRequest) (model.Student, error)
 	Patch(ctx context.Context, id int, req *model.PatchStudentRequest) (model.Student, error)
 	Delete(ctx context.Context, id int) (bool, error)
@@ -85,7 +85,7 @@ func (r *studentRepository) FindAll(ctx context.Context, page, limit int, search
 	}
 
 	query := fmt.Sprintf(`
-		SELECT id, nim, name, grade, is_active
+		SELECT id, nim, name, grade, is_active, COALESCE(owner_id, 0)
 		FROM students
 		WHERE %s
 		ORDER BY %s %s
@@ -109,6 +109,7 @@ func (r *studentRepository) FindAll(ctx context.Context, page, limit int, search
 			&student.Name,
 			&student.Grade,
 			&student.IsActive,
+			&student.OwnerID,
 		); err != nil {
 			return nil, 0, err
 		}
@@ -126,7 +127,7 @@ func (r *studentRepository) FindByID(ctx context.Context, id int) (model.Student
 	var student model.Student
 	err := r.db.QueryRow(
 		ctx,
-		`SELECT id, nim, name, grade, is_active
+		`SELECT id, nim, name, grade, is_active, COALESCE(owner_id, 0)
 		 FROM students
 		 WHERE id = $1`,
 		id,
@@ -136,6 +137,7 @@ func (r *studentRepository) FindByID(ctx context.Context, id int) (model.Student
 		&student.Name,
 		&student.Grade,
 		&student.IsActive,
+		&student.OwnerID,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -146,23 +148,25 @@ func (r *studentRepository) FindByID(ctx context.Context, id int) (model.Student
 	return student, nil
 }
 
-func (r *studentRepository) Create(ctx context.Context, req *model.CreateStudentRequest) (model.Student, error) {
+func (r *studentRepository) Create(ctx context.Context, req *model.CreateStudentRequest, ownerID int) (model.Student, error) {
 	var student model.Student
 	err := r.db.QueryRow(
 		ctx,
-		`INSERT INTO students (nim, name, grade, is_active)
-		 VALUES ($1, $2, $3, $4)
-		 RETURNING id, nim, name, grade, is_active`,
+		`INSERT INTO students (nim, name, grade, is_active, owner_id)
+		 VALUES ($1, $2, $3, $4, $5)
+		 RETURNING id, nim, name, grade, is_active, owner_id`,
 		req.NIM,
 		req.Name,
 		req.Grade,
 		req.IsActive,
+		ownerID,
 	).Scan(
 		&student.ID,
 		&student.NIM,
 		&student.Name,
 		&student.Grade,
 		&student.IsActive,
+		&student.OwnerID,
 	)
 	if err != nil {
 		if strings.Contains(err.Error(), "students_nim_key") {
@@ -183,7 +187,7 @@ func (r *studentRepository) Update(ctx context.Context, id int, req *model.Repla
 		     grade = $3,
 		     is_active = $4
 		 WHERE id = $5
-		 RETURNING id, nim, name, grade, is_active`,
+		 RETURNING id, nim, name, grade, is_active, COALESCE(owner_id, 0)`,
 		req.NIM,
 		req.Name,
 		req.Grade,
@@ -195,6 +199,7 @@ func (r *studentRepository) Update(ctx context.Context, id int, req *model.Repla
 		&student.Name,
 		&student.Grade,
 		&student.IsActive,
+		&student.OwnerID,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -247,7 +252,7 @@ func (r *studentRepository) Patch(ctx context.Context, id int, req *model.PatchS
 		UPDATE students
 		SET %s
 		WHERE id = $%d
-		RETURNING id, nim, name, grade, is_active
+		RETURNING id, nim, name, grade, is_active, COALESCE(owner_id, 0)
 	`, strings.Join(setParts, ", "), argNumber)
 
 	var student model.Student
@@ -257,6 +262,7 @@ func (r *studentRepository) Patch(ctx context.Context, id int, req *model.PatchS
 		&student.Name,
 		&student.Grade,
 		&student.IsActive,
+		&student.OwnerID,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
