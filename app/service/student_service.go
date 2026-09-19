@@ -99,8 +99,8 @@ func (s *StudentService) UpdateStudent(c *fiber.Ctx) error {
 	if err != nil {
 		return helper.Fail(c, fiber.StatusBadRequest, "Invalid student ID")
 	}
-	if _, err := s.authorizeStudentUpdate(c, id); err != nil {
-		return err
+	if _, allowed := s.authorizeStudentUpdate(c, id); !allowed {
+		return nil
 	}
 
 	var req model.ReplaceStudentRequest
@@ -131,8 +131,8 @@ func (s *StudentService) PatchStudent(c *fiber.Ctx) error {
 	if err != nil {
 		return helper.Fail(c, fiber.StatusBadRequest, "Invalid student ID")
 	}
-	if _, err := s.authorizeStudentUpdate(c, id); err != nil {
-		return err
+	if _, allowed := s.authorizeStudentUpdate(c, id); !allowed {
+		return nil
 	}
 
 	var req model.PatchStudentRequest
@@ -180,20 +180,24 @@ func (s *StudentService) DeleteStudent(c *fiber.Ctx) error {
 	return helper.NoContent(c)
 }
 
-func (s *StudentService) authorizeStudentUpdate(c *fiber.Ctx, id int) (model.Student, error) {
+func (s *StudentService) authorizeStudentUpdate(c *fiber.Ctx, id int) (model.Student, bool) {
 	current, ok := helper.CurrentUser(c)
 	if !ok {
-		return model.Student{}, helper.Fail(c, fiber.StatusUnauthorized, "belum terautentikasi")
+		helper.Fail(c, fiber.StatusUnauthorized, "belum terautentikasi")
+		return model.Student{}, false
 	}
 	existingStudent, err := s.repo.FindByID(c.Context(), id)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return model.Student{}, helper.Fail(c, fiber.StatusNotFound, "Student not found")
+			helper.Fail(c, fiber.StatusNotFound, "Student not found")
+			return model.Student{}, false
 		}
-		return model.Student{}, helper.Fail(c, fiber.StatusInternalServerError, "Failed to retrieve student")
+		helper.Fail(c, fiber.StatusInternalServerError, "Failed to retrieve student")
+		return model.Student{}, false
 	}
 	if !CanAccessStudent(current, existingStudent.OwnerID, s.perms, "student:update:any") {
-		return model.Student{}, helper.Fail(c, fiber.StatusForbidden, "tidak berhak mengubah data student ini")
+		helper.Fail(c, fiber.StatusForbidden, "tidak berhak mengubah data student ini")
+		return model.Student{}, false
 	}
-	return existingStudent, nil
+	return existingStudent, true
 }
