@@ -29,6 +29,36 @@ func (s *UserService) List(c *fiber.Ctx) error {
 	return helper.Success(c, fiber.StatusOK, "daftar user berhasil diambil", users)
 }
 
+func (s *UserService) Create(c *fiber.Ctx) error {
+	var req model.RegisterRequest
+	if err := c.BodyParser(&req); err != nil {
+		return helper.Fail(c, fiber.StatusBadRequest, "body harus berupa JSON yang valid")
+	}
+	req.Username, req.Email = strings.TrimSpace(req.Username), strings.TrimSpace(req.Email)
+	if errs := ValidateRegister(req); len(errs) > 0 {
+		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"success": false, "message": "validation failed", "errors": errs})
+	}
+	password, err := helper.HashPassword(req.Password)
+	if err != nil {
+		return helper.Fail(c, fiber.StatusInternalServerError, "gagal memproses password")
+	}
+	user, err := s.repo.Create(c.Context(), model.User{
+		Username: req.Username,
+		Email:    req.Email,
+		Password: password,
+		Role:     "user",
+		IsActive: true,
+	})
+	if err != nil {
+		if errors.Is(err, repository.ErrDuplicate) {
+			return helper.Fail(c, fiber.StatusConflict, "username atau email sudah dipakai")
+		}
+		return helper.Fail(c, fiber.StatusInternalServerError, "gagal membuat user")
+	}
+	c.Location("/api/v1/users/" + strconv.Itoa(user.ID))
+	return helper.Created(c, "user berhasil dibuat", user)
+}
+
 func (s *UserService) Get(c *fiber.Ctx) error {
 	current, id, ok := currentAndID(c)
 	if !ok {

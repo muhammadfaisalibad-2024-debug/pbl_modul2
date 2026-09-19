@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"api-students/app/model"
 
@@ -148,6 +149,9 @@ func (r *userPostgresRepository) Create(
 	)
 
 	if err != nil {
+		if strings.Contains(err.Error(), "duplicate key") {
+			return model.User{}, ErrDuplicate
+		}
 		return model.User{}, err
 	}
 

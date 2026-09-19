@@ -82,6 +82,7 @@ func RegisterRoutes(
 	)
 
 	users.Get("/", middleware.RequirePermission(perms, "user:list"), userService.List)
+	users.Post("/", middleware.RequireJSON(), middleware.RequirePermission(perms, "user:update:any"), userService.Create)
 	users.Get("/:id", userService.Get)
 	users.Put("/:id", middleware.RequireJSON(), userService.Replace)
 	users.Patch("/:id", middleware.RequireJSON(), userService.Patch)
