@@ -13,6 +13,7 @@ func RegisterRoutes(
 	app *fiber.App,
 	db *pgxpool.Pool,
 	studentService *service.StudentService,
+	prestasiService *service.PrestasiService,
 	authService *service.AuthService,
 	userService *service.UserService,
 	jwtManager *helper.JWTManager,
@@ -101,6 +102,11 @@ func RegisterRoutes(
 		"/",
 		middleware.RequirePermission(perms, "student:list"),
 		studentService.GetStudents,
+	)
+
+	students.Get(
+		"/:nim/prestasi",
+		prestasiService.GetByStudentNIM,
 	)
 
 	students.Get(

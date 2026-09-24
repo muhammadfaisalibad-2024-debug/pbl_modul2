@@ -22,25 +22,49 @@ func NewStudentService(repo repository.StudentRepository, perms *helper.Permissi
 }
 
 func (s *StudentService) GetStudents(c *fiber.Ctx) error {
-	q := helper.ParseListQuery(c)
-
-	students, total, err := s.repo.FindAll(
-		c.Context(),
-		q.Page, q.Limit,
-		q.Search, q.SortBy, q.Order, q.IsActive,
-	)
+	format, err := helper.Negotiate(c, fiber.MIMEApplicationJSON, helper.FormatCSV)
 	if err != nil {
-		return helper.Fail(c, fiber.StatusInternalServerError, "Failed to retrieve students")
+		return err
 	}
-
-	meta := model.Meta{
-		Page:       q.Page,
-		Limit:      q.Limit,
-		Total:      total,
-		TotalPages: CountTotalPages(total, q.Limit),
+	limit := c.QueryInt("limit", 10)
+	if limit < 1 {
+		limit = 10
 	}
-
-	return helper.SuccessList(c, "Students retrieved successfully", students, meta)
+	if limit > 100 {
+		limit = 100
+	}
+	query := model.StudentCursorQuery{Limit: limit, Search: strings.TrimSpace(c.Query("search"))}
+	if raw := strings.TrimSpace(c.Query("cursor")); raw != "" {
+		cur, e := helper.DecodeCursor(raw)
+		if e != nil {
+			return helper.BadRequest("cursor tidak valid")
+		}
+		query.After = &cur
+	}
+	if raw := c.Query("is_active"); raw != "" {
+		if raw != "true" && raw != "false" {
+			return helper.BadRequest("is_active tidak valid")
+		}
+		v := raw == "true"
+		query.IsActive = &v
+	}
+	students, err := s.repo.FindAfterCursor(c.Context(), query)
+	if err != nil {
+		return helper.Internal(err)
+	}
+	hasMore := len(students) > limit
+	if hasMore {
+		students = students[:limit]
+	}
+	meta := model.CursorMeta{Limit: limit, HasMore: hasMore}
+	if hasMore {
+		last := students[len(students)-1]
+		meta.NextCursor = helper.EncodeCursor(last.CreatedAt, last.ID)
+	}
+	if format == helper.FormatCSV {
+		return helper.WriteStudentsCSV(c, students)
+	}
+	return helper.SuccessCursor(c, "Students retrieved successfully", students, meta)
 }
 
 func (s *StudentService) GetStudent(c *fiber.Ctx) error {
@@ -78,8 +102,8 @@ func (s *StudentService) CreateStudent(c *fiber.Ctx) error {
 		return helper.Fail(c, fiber.StatusBadRequest, "Invalid JSON body")
 	}
 
-	if err := ValidateCreate(&req); err != nil {
-		return helper.Fail(c, fiber.StatusUnprocessableEntity, "NIM and Name are required")
+	if errs := helper.ValidateStruct(req); errs != nil {
+		return helper.Validation(errs)
 	}
 
 	student, err := s.repo.Create(c.Context(), &req, current.UserID)
@@ -108,8 +132,8 @@ func (s *StudentService) UpdateStudent(c *fiber.Ctx) error {
 		return helper.Fail(c, fiber.StatusBadRequest, "Invalid JSON body")
 	}
 
-	if err := ValidateReplace(&req); err != nil {
-		return helper.Fail(c, fiber.StatusUnprocessableEntity, "NIM and Name are required")
+	if errs := helper.ValidateStruct(req); errs != nil {
+		return helper.Validation(errs)
 	}
 
 	student, err := s.repo.Update(c.Context(), id, &req)
@@ -141,7 +165,10 @@ func (s *StudentService) PatchStudent(c *fiber.Ctx) error {
 	}
 
 	if IsEmptyPatch(&req) {
-		return helper.Fail(c, fiber.StatusUnprocessableEntity, "No fields to update")
+		return helper.BadRequest("No fields to update")
+	}
+	if errs := helper.ValidateStruct(req); errs != nil {
+		return helper.Validation(errs)
 	}
 
 	student, err := s.repo.Patch(c.Context(), id, &req)

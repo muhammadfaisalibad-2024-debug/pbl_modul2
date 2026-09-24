@@ -20,7 +20,9 @@ var (
 
 type StudentRepository interface {
 	FindAll(ctx context.Context, page, limit int, search, sortBy, order, active string) ([]model.Student, int, error)
+	FindAfterCursor(ctx context.Context, q model.StudentCursorQuery) ([]model.Student, error)
 	FindByID(ctx context.Context, id int) (model.Student, error)
+	FindByNIM(ctx context.Context, nim string) (model.Student, error)
 	Create(ctx context.Context, req *model.CreateStudentRequest, ownerID int) (model.Student, error)
 	Update(ctx context.Context, id int, req *model.ReplaceStudentRequest) (model.Student, error)
 	Patch(ctx context.Context, id int, req *model.PatchStudentRequest) (model.Student, error)
@@ -33,6 +35,38 @@ type studentRepository struct {
 
 func NewStudentRepository(db *pgxpool.Pool) StudentRepository {
 	return &studentRepository{db: db}
+}
+
+func (r *studentRepository) FindAfterCursor(ctx context.Context, q model.StudentCursorQuery) ([]model.Student, error) {
+	args := []any{}
+	where := " WHERE 1=1"
+	if q.Search != "" {
+		args = append(args, "%"+q.Search+"%")
+		where += fmt.Sprintf(" AND (name ILIKE $%d OR nim ILIKE $%d)", len(args), len(args))
+	}
+	if q.IsActive != nil {
+		args = append(args, *q.IsActive)
+		where += fmt.Sprintf(" AND is_active=$%d", len(args))
+	}
+	if q.After != nil {
+		args = append(args, q.After.CreatedAt, q.After.ID)
+		where += fmt.Sprintf(" AND (created_at,id)<($%d,$%d)", len(args)-1, len(args))
+	}
+	args = append(args, q.Limit+1)
+	rows, err := r.db.Query(ctx, "SELECT id,nim,name,grade,is_active,COALESCE(owner_id,0),created_at FROM students"+where+fmt.Sprintf(" ORDER BY created_at DESC,id DESC LIMIT $%d", len(args)), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []model.Student{}
+	for rows.Next() {
+		var s model.Student
+		if err := rows.Scan(&s.ID, &s.NIM, &s.Name, &s.Grade, &s.IsActive, &s.OwnerID, &s.CreatedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, s)
+	}
+	return result, rows.Err()
 }
 
 func (r *studentRepository) FindAll(ctx context.Context, page, limit int, search, sortBy, order, active string) ([]model.Student, int, error) {
@@ -138,6 +172,23 @@ func (r *studentRepository) FindByID(ctx context.Context, id int) (model.Student
 		&student.Grade,
 		&student.IsActive,
 		&student.OwnerID,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return model.Student{}, ErrNotFound
+		}
+		return model.Student{}, err
+	}
+	return student, nil
+}
+
+func (r *studentRepository) FindByNIM(ctx context.Context, nim string) (model.Student, error) {
+	var student model.Student
+	err := r.db.QueryRow(ctx, `
+		SELECT id, nim, name, grade, is_active, COALESCE(owner_id, 0)
+		FROM students WHERE nim = $1`, nim).Scan(
+		&student.ID, &student.NIM, &student.Name, &student.Grade,
+		&student.IsActive, &student.OwnerID,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

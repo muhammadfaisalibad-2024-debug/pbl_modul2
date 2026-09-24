@@ -62,6 +62,7 @@ func main() {
 	// ==============================
 
 	studentRepo := repository.NewStudentRepository(db)
+	prestasiRepo := repository.NewPrestasiRepository(db)
 	userRepo := repository.NewUserRepository(db)
 	tokenRepo := repository.NewTokenRepository(db)
 	roleRepo := repository.NewRoleRepository(db)
@@ -79,6 +80,7 @@ func main() {
 	// ==============================
 
 	studentService := service.NewStudentService(studentRepo, permissions)
+	prestasiService := service.NewPrestasiService(studentRepo, prestasiRepo)
 	userService := service.NewUserService(userRepo, permissions)
 
 	authService := service.NewAuthService(
@@ -96,6 +98,7 @@ func main() {
 	app := config.NewApp(
 		db,
 		studentService,
+		prestasiService,
 		authService,
 		userService,
 		jwtManager,

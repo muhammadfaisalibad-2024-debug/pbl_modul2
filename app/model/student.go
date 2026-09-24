@@ -1,17 +1,27 @@
 package model
 
+import "time"
+
 type Student struct {
-	ID       int     `json:"id"`
-	NIM      string  `json:"nim"`
-	Name     string  `json:"name"`
-	Grade    float64 `json:"grade"`
-	IsActive bool    `json:"is_active"`
-	OwnerID  int     `json:"owner_id"`
+	ID        int       `json:"id"`
+	NIM       string    `json:"nim" validate:"required,nim"`
+	Name      string    `json:"name" validate:"required,max=120"`
+	Grade     float64   `json:"grade"`
+	IsActive  bool      `json:"is_active"`
+	OwnerID   int       `json:"owner_id"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type StudentCursorQuery struct {
+	Limit    int
+	After    *Cursor
+	Search   string
+	IsActive *bool
 }
 
 type CreateStudentRequest struct {
-	NIM      string  `json:"nim"`
-	Name     string  `json:"name"`
+	NIM      string  `json:"nim" validate:"required,nim"`
+	Name     string  `json:"name" validate:"required,max=120"`
 	Grade    float64 `json:"grade"`
 	IsActive bool    `json:"is_active"`
 }
@@ -24,8 +34,8 @@ type ReplaceStudentRequest struct {
 }
 
 type PatchStudentRequest struct {
-	NIM      *string  `json:"nim,omitempty"`
-	Name     *string  `json:"name,omitempty"`
+	NIM      *string  `json:"nim,omitempty" validate:"omitnil,nim"`
+	Name     *string  `json:"name,omitempty" validate:"omitnil,required,max=120"`
 	Grade    *float64 `json:"grade,omitempty"`
 	IsActive *bool    `json:"is_active,omitempty"`
 }
