@@ -22,11 +22,42 @@ func NewUserService(repo repository.UserRepository, perms *helper.PermissionSet)
 }
 
 func (s *UserService) List(c *fiber.Ctx) error {
-	users, err := s.repo.FindAll(c.Context())
+	format, err := helper.Negotiate(c, fiber.MIMEApplicationJSON, helper.FormatCSV)
 	if err != nil {
-		return helper.Fail(c, fiber.StatusInternalServerError, "gagal mengambil daftar user")
+		return err
 	}
-	return helper.Success(c, fiber.StatusOK, "daftar user berhasil diambil", users)
+	limit := c.QueryInt("limit", 10)
+	if limit < 1 {
+		limit = 10
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	query := model.CursorQuery{Limit: limit, Search: strings.TrimSpace(c.Query("search"))}
+	if raw := strings.TrimSpace(c.Query("cursor")); raw != "" {
+		cursor, e := helper.DecodeCursor(raw)
+		if e != nil {
+			return helper.BadRequest("cursor tidak valid")
+		}
+		query.After = &cursor
+	}
+	users, err := s.repo.FindAfterCursor(c.Context(), query)
+	if err != nil {
+		return helper.Internal(err)
+	}
+	hasMore := len(users) > limit
+	if hasMore {
+		users = users[:limit]
+	}
+	meta := model.CursorMeta{Limit: limit, HasMore: hasMore}
+	if hasMore {
+		last := users[len(users)-1]
+		meta.NextCursor = helper.EncodeCursor(last.CreatedAt, last.ID)
+	}
+	if format == helper.FormatCSV {
+		return helper.WriteUsersCSV(c, users)
+	}
+	return helper.SuccessCursor(c, "daftar user berhasil diambil", users, meta)
 }
 
 func (s *UserService) Create(c *fiber.Ctx) error {
@@ -35,8 +66,8 @@ func (s *UserService) Create(c *fiber.Ctx) error {
 		return helper.Fail(c, fiber.StatusBadRequest, "body harus berupa JSON yang valid")
 	}
 	req.Username, req.Email = strings.TrimSpace(req.Username), strings.TrimSpace(req.Email)
-	if errs := ValidateRegister(req); len(errs) > 0 {
-		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"success": false, "message": "validation failed", "errors": errs})
+	if errs := helper.ValidateStruct(req); errs != nil {
+		return helper.Validation(errs)
 	}
 	password, err := helper.HashPassword(req.Password)
 	if err != nil {
@@ -87,8 +118,8 @@ func (s *UserService) Replace(c *fiber.Ctx) error {
 		return helper.Fail(c, fiber.StatusBadRequest, "body harus berupa JSON yang valid")
 	}
 	req.Username, req.Email = strings.TrimSpace(req.Username), strings.TrimSpace(req.Email)
-	if req.Username == "" || req.Email == "" {
-		return helper.Fail(c, fiber.StatusUnprocessableEntity, "username dan email wajib diisi")
+	if errs := helper.ValidateStruct(req); errs != nil {
+		return helper.Validation(errs)
 	}
 	user, err := s.repo.Update(c.Context(), id, req)
 	if err != nil {
@@ -110,21 +141,10 @@ func (s *UserService) Patch(c *fiber.Ctx) error {
 		return helper.Fail(c, fiber.StatusBadRequest, "body harus berupa JSON yang valid")
 	}
 	if req.Username == nil && req.Email == nil && req.IsActive == nil {
-		return helper.Fail(c, fiber.StatusUnprocessableEntity, "tidak ada field yang diubah")
+		return helper.BadRequest("tidak ada field yang diubah")
 	}
-	if req.Username != nil {
-		trimmed := strings.TrimSpace(*req.Username)
-		if trimmed == "" {
-			return helper.Fail(c, fiber.StatusUnprocessableEntity, "username tidak boleh kosong")
-		}
-		req.Username = &trimmed
-	}
-	if req.Email != nil {
-		trimmed := strings.TrimSpace(*req.Email)
-		if trimmed == "" {
-			return helper.Fail(c, fiber.StatusUnprocessableEntity, "email tidak boleh kosong")
-		}
-		req.Email = &trimmed
+	if errs := helper.ValidateStruct(req); errs != nil {
+		return helper.Validation(errs)
 	}
 	user, err := s.repo.Patch(c.Context(), id, req)
 	if err != nil {
