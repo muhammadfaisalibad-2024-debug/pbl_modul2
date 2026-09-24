@@ -70,22 +70,22 @@ func (s *StudentService) GetStudents(c *fiber.Ctx) error {
 func (s *StudentService) GetStudent(c *fiber.Ctx) error {
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
-		return helper.Fail(c, fiber.StatusBadRequest, "Invalid student ID")
+		return helper.BadRequest("Invalid student ID")
 	}
 
 	student, err := s.repo.FindByID(c.Context(), id)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return helper.Fail(c, fiber.StatusNotFound, "Student not found")
+			return helper.NotFound("Student not found")
 		}
-		return helper.Fail(c, fiber.StatusInternalServerError, "Failed to retrieve student")
+		return helper.Internal(err)
 	}
 	current, ok := helper.CurrentUser(c)
 	if !ok {
-		return helper.Fail(c, fiber.StatusUnauthorized, "belum terautentikasi")
+		return helper.Unauthorized("belum terautentikasi")
 	}
 	if !CanAccessStudent(current, student.OwnerID, s.perms, "student:read:any") {
-		return helper.Fail(c, fiber.StatusForbidden, "tidak berhak mengakses data student ini")
+		return helper.Forbidden("tidak berhak mengakses data student ini")
 	}
 
 	return helper.Success(c, fiber.StatusOK, "Student retrieved successfully", student)
@@ -94,12 +94,12 @@ func (s *StudentService) GetStudent(c *fiber.Ctx) error {
 func (s *StudentService) CreateStudent(c *fiber.Ctx) error {
 	current, ok := helper.CurrentUser(c)
 	if !ok {
-		return helper.Fail(c, fiber.StatusUnauthorized, "belum terautentikasi")
+		return helper.Unauthorized("belum terautentikasi")
 	}
 	var req model.CreateStudentRequest
 
 	if err := c.BodyParser(&req); err != nil {
-		return helper.Fail(c, fiber.StatusBadRequest, "Invalid JSON body")
+		return helper.BadRequest("Invalid JSON body")
 	}
 
 	if errs := helper.ValidateStruct(req); errs != nil {
@@ -109,9 +109,9 @@ func (s *StudentService) CreateStudent(c *fiber.Ctx) error {
 	student, err := s.repo.Create(c.Context(), &req, current.UserID)
 	if err != nil {
 		if errors.Is(err, repository.ErrDuplicate) {
-			return helper.Fail(c, fiber.StatusConflict, "NIM already exists")
+			return helper.Conflict("NIM already exists")
 		}
-		return helper.Fail(c, fiber.StatusInternalServerError, "Failed to create student")
+		return helper.Internal(err)
 	}
 
 	c.Location("/api/v1/students/" + strconv.Itoa(student.ID))
@@ -121,7 +121,7 @@ func (s *StudentService) CreateStudent(c *fiber.Ctx) error {
 func (s *StudentService) UpdateStudent(c *fiber.Ctx) error {
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
-		return helper.Fail(c, fiber.StatusBadRequest, "Invalid student ID")
+		return helper.BadRequest("Invalid student ID")
 	}
 	if _, allowed := s.authorizeStudentUpdate(c, id); !allowed {
 		return nil
@@ -129,7 +129,7 @@ func (s *StudentService) UpdateStudent(c *fiber.Ctx) error {
 
 	var req model.ReplaceStudentRequest
 	if err := c.BodyParser(&req); err != nil {
-		return helper.Fail(c, fiber.StatusBadRequest, "Invalid JSON body")
+		return helper.BadRequest("Invalid JSON body")
 	}
 
 	if errs := helper.ValidateStruct(req); errs != nil {
@@ -139,12 +139,12 @@ func (s *StudentService) UpdateStudent(c *fiber.Ctx) error {
 	student, err := s.repo.Update(c.Context(), id, &req)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return helper.Fail(c, fiber.StatusNotFound, "Student not found")
+			return helper.NotFound("Student not found")
 		}
 		if errors.Is(err, repository.ErrDuplicate) {
-			return helper.Fail(c, fiber.StatusConflict, "NIM already exists")
+			return helper.Conflict("NIM already exists")
 		}
-		return helper.Fail(c, fiber.StatusInternalServerError, "Failed to update student")
+		return helper.Internal(err)
 	}
 
 	return helper.Success(c, fiber.StatusOK, "Student updated successfully", student)
@@ -153,7 +153,7 @@ func (s *StudentService) UpdateStudent(c *fiber.Ctx) error {
 func (s *StudentService) PatchStudent(c *fiber.Ctx) error {
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
-		return helper.Fail(c, fiber.StatusBadRequest, "Invalid student ID")
+		return helper.BadRequest("Invalid student ID")
 	}
 	if _, allowed := s.authorizeStudentUpdate(c, id); !allowed {
 		return nil
@@ -161,7 +161,7 @@ func (s *StudentService) PatchStudent(c *fiber.Ctx) error {
 
 	var req model.PatchStudentRequest
 	if err := c.BodyParser(&req); err != nil {
-		return helper.Fail(c, fiber.StatusBadRequest, "Invalid JSON body")
+		return helper.BadRequest("Invalid JSON body")
 	}
 
 	if IsEmptyPatch(&req) {
@@ -174,16 +174,16 @@ func (s *StudentService) PatchStudent(c *fiber.Ctx) error {
 	student, err := s.repo.Patch(c.Context(), id, &req)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return helper.Fail(c, fiber.StatusNotFound, "Student not found")
+			return helper.NotFound("Student not found")
 		}
 		if errors.Is(err, repository.ErrDuplicate) {
-			return helper.Fail(c, fiber.StatusConflict, "NIM already exists")
+			return helper.Conflict("NIM already exists")
 		}
 		// "no fields to update" guard from repository (fallback)
 		if strings.Contains(err.Error(), "no fields to update") {
-			return helper.Fail(c, fiber.StatusUnprocessableEntity, "No fields to update")
+			return helper.BadRequest("No fields to update")
 		}
-		return helper.Fail(c, fiber.StatusInternalServerError, "Failed to patch student")
+		return helper.Internal(err)
 	}
 
 	return helper.Success(c, fiber.StatusOK, "Student patched successfully", student)
@@ -192,16 +192,16 @@ func (s *StudentService) PatchStudent(c *fiber.Ctx) error {
 func (s *StudentService) DeleteStudent(c *fiber.Ctx) error {
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
-		return helper.Fail(c, fiber.StatusBadRequest, "Invalid student ID")
+		return helper.BadRequest("Invalid student ID")
 	}
 
 	deleted, err := s.repo.Delete(c.Context(), id)
 	if err != nil {
-		return helper.Fail(c, fiber.StatusInternalServerError, "Failed to delete student")
+		return helper.Internal(err)
 	}
 
 	if !deleted {
-		return helper.Fail(c, fiber.StatusNotFound, "Student not found")
+		return helper.NotFound("Student not found")
 	}
 
 	return helper.NoContent(c)
@@ -210,20 +210,20 @@ func (s *StudentService) DeleteStudent(c *fiber.Ctx) error {
 func (s *StudentService) authorizeStudentUpdate(c *fiber.Ctx, id int) (model.Student, bool) {
 	current, ok := helper.CurrentUser(c)
 	if !ok {
-		helper.Fail(c, fiber.StatusUnauthorized, "belum terautentikasi")
+		helper.Unauthorized("belum terautentikasi")
 		return model.Student{}, false
 	}
 	existingStudent, err := s.repo.FindByID(c.Context(), id)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			helper.Fail(c, fiber.StatusNotFound, "Student not found")
+			helper.NotFound("Student not found")
 			return model.Student{}, false
 		}
-		helper.Fail(c, fiber.StatusInternalServerError, "Failed to retrieve student")
+		helper.Internal(err)
 		return model.Student{}, false
 	}
 	if !CanAccessStudent(current, existingStudent.OwnerID, s.perms, "student:update:any") {
-		helper.Fail(c, fiber.StatusForbidden, "tidak berhak mengubah data student ini")
+		helper.Forbidden("tidak berhak mengubah data student ini")
 		return model.Student{}, false
 	}
 	return existingStudent, true
