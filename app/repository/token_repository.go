@@ -3,65 +3,45 @@ package repository
 import (
 	"context"
 	"errors"
-	"fmt"
+	"time"
 
 	"api-students/app/model"
+	"api-students/helper"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type TokenRepository interface {
-	Save(ctx context.Context, token model.RefreshToken) error
-	FindActive(ctx context.Context, tokenHash string) (model.RefreshToken, error)
-	Revoke(ctx context.Context, tokenHash string) error
-	RevokeAllForUser(ctx context.Context, userID int) error
-}
-
-type tokenPostgresRepository struct {
+type TokenRepository struct {
 	pool *pgxpool.Pool
 }
 
-func NewTokenRepository(pool *pgxpool.Pool) TokenRepository {
-	return &tokenPostgresRepository{pool: pool}
+func NewTokenRepository(pool *pgxpool.Pool) *TokenRepository {
+	return &TokenRepository{pool: pool}
 }
 
-func (r *tokenPostgresRepository) Save(
-	ctx context.Context,
-	token model.RefreshToken,
-) error {
-
+func (r *TokenRepository) Save(ctx context.Context, userID int, tokenHash string, expiresAt time.Time) error {
 	_, err := r.pool.Exec(
 		ctx,
-		`INSERT INTO refresh_tokens
-		(user_id, token_hash, expires_at)
+		`INSERT INTO refresh_tokens (user_id, token_hash, expires_at)
 		VALUES ($1, $2, $3)`,
-		token.UserID,
-		token.TokenHash,
-		token.ExpiresAt,
+		userID,
+		tokenHash,
+		expiresAt,
 	)
-
 	if err != nil {
-		return fmt.Errorf("menyimpan refresh token: %w", err)
+		return helper.Internal(err)
 	}
-
 	return nil
 }
 
-func (r *tokenPostgresRepository) FindActive(
-	ctx context.Context,
-	tokenHash string,
-) (model.RefreshToken, error) {
-
+func (r *TokenRepository) FindValid(ctx context.Context, tokenHash string) (*model.RefreshToken, error) {
 	var token model.RefreshToken
-
 	err := r.pool.QueryRow(
 		ctx,
 		`SELECT id, user_id, token_hash, expires_at, revoked_at, created_at
 		FROM refresh_tokens
-		WHERE token_hash = $1
-		AND revoked_at IS NULL
-		AND expires_at > NOW()`,
+		WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > NOW()`,
 		tokenHash,
 	).Scan(
 		&token.ID,
@@ -71,57 +51,35 @@ func (r *tokenPostgresRepository) FindActive(
 		&token.RevokedAt,
 		&token.CreatedAt,
 	)
-
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return model.RefreshToken{}, ErrNotFound
+			return nil, helper.Unauthorized("refresh token tidak valid")
 		}
-
-		return model.RefreshToken{},
-			fmt.Errorf("mengambil refresh token: %w", err)
+		return nil, helper.Internal(err)
 	}
-
-	return token, nil
+	return &token, nil
 }
 
-func (r *tokenPostgresRepository) Revoke(
-	ctx context.Context,
-	tokenHash string,
-) error {
-
+func (r *TokenRepository) Revoke(ctx context.Context, id int64) error {
 	_, err := r.pool.Exec(
 		ctx,
-		`UPDATE refresh_tokens
-		SET revoked_at = NOW()
-		WHERE token_hash = $1
-		AND revoked_at IS NULL`,
-		tokenHash,
+		`UPDATE refresh_tokens SET revoked_at = NOW() WHERE id = $1 AND revoked_at IS NULL`,
+		id,
 	)
-
 	if err != nil {
-		return fmt.Errorf("mencabut refresh token: %w", err)
+		return helper.Internal(err)
 	}
-
 	return nil
 }
 
-func (r *tokenPostgresRepository) RevokeAllForUser(
-	ctx context.Context,
-	userID int,
-) error {
-
+func (r *TokenRepository) RevokeByHash(ctx context.Context, tokenHash string) error {
 	_, err := r.pool.Exec(
 		ctx,
-		`UPDATE refresh_tokens
-		SET revoked_at = NOW()
-		WHERE user_id = $1
-		AND revoked_at IS NULL`,
-		userID,
+		`UPDATE refresh_tokens SET revoked_at = NOW() WHERE token_hash = $1 AND revoked_at IS NULL`,
+		tokenHash,
 	)
-
 	if err != nil {
-		return fmt.Errorf("mencabut seluruh refresh token user: %w", err)
+		return helper.Internal(err)
 	}
-
 	return nil
 }

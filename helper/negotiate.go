@@ -3,10 +3,11 @@ package helper
 import (
 	"api-students/app/model"
 	"encoding/csv"
-	"github.com/gofiber/fiber/v2"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gofiber/fiber/v2"
 )
 
 const FormatCSV = "text/csv"
@@ -22,6 +23,7 @@ func Negotiate(c *fiber.Ctx, offered ...string) (string, error) {
 	}
 	return chosen, nil
 }
+
 func WriteUsersCSV(c *fiber.Ctx, users []model.User) error {
 	c.Set(fiber.HeaderContentType, FormatCSV+"; charset=utf-8")
 	c.Set(fiber.HeaderContentDisposition, `attachment; filename="users.csv"`)
@@ -45,9 +47,9 @@ func WriteStudentsCSV(c *fiber.Ctx, students []model.Student) error {
 	c.Set(fiber.HeaderContentDisposition, `attachment; filename="students.csv"`)
 	var b strings.Builder
 	w := csv.NewWriter(&b)
-	_ = w.Write([]string{"id", "nim", "name", "grade", "is_active", "owner_id", "created_at"})
+	_ = w.Write([]string{"id", "nim", "nama", "prodi", "angkatan", "ipk_terakhir", "created_at"})
 	for _, s := range students {
-		if err := w.Write([]string{strconv.Itoa(s.ID), s.NIM, s.Name, strconv.FormatFloat(s.Grade, 'f', -1, 64), strconv.FormatBool(s.IsActive), strconv.Itoa(s.OwnerID), s.CreatedAt.UTC().Format(time.RFC3339)}); err != nil {
+		if err := w.Write([]string{strconv.Itoa(s.ID), s.NIM, s.Nama, s.Prodi, strconv.Itoa(s.Angkatan), strconv.FormatFloat(s.IPKTerakhir, 'f', 2, 64), s.CreatedAt.UTC().Format(time.RFC3339)}); err != nil {
 			return Internal(err)
 		}
 	}

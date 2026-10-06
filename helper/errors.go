@@ -23,6 +23,7 @@ type AppError struct {
 	Status  int
 	Code    string
 	Message string
+	Errors  map[string][]string
 	Fields  map[string]string
 	cause   error
 }
@@ -33,37 +34,81 @@ func (e *AppError) Error() string {
 	}
 	return fmt.Sprintf("%s: %s", e.Code, e.Message)
 }
+
 func (e *AppError) Unwrap() error                 { return e.cause }
 func (e *AppError) WithCause(err error) *AppError { e.cause = err; return e }
+
 func BadRequest(message string) *AppError {
-	return &AppError{fiber.StatusBadRequest, CodeBadRequest, message, nil, nil}
+	return &AppError{Status: fiber.StatusBadRequest, Code: CodeBadRequest, Message: message}
 }
+
 func Unauthorized(message string) *AppError {
-	return &AppError{fiber.StatusUnauthorized, CodeUnauthorized, message, nil, nil}
+	return &AppError{Status: fiber.StatusUnauthorized, Code: CodeUnauthorized, Message: message}
 }
+
 func Forbidden(message string) *AppError {
-	return &AppError{fiber.StatusForbidden, CodeForbidden, message, nil, nil}
+	return &AppError{Status: fiber.StatusForbidden, Code: CodeForbidden, Message: message}
 }
+
 func NotFound(message string) *AppError {
-	return &AppError{fiber.StatusNotFound, CodeNotFound, message, nil, nil}
+	return &AppError{Status: fiber.StatusNotFound, Code: CodeNotFound, Message: message}
 }
+
 func Conflict(message string) *AppError {
-	return &AppError{fiber.StatusConflict, CodeConflict, message, nil, nil}
+	return &AppError{Status: fiber.StatusConflict, Code: CodeConflict, Message: message}
 }
+
 func Validation(fields map[string]string) *AppError {
-	return &AppError{fiber.StatusUnprocessableEntity, CodeValidation, "validasi gagal", fields, nil}
+	errMap := make(map[string][]string)
+	for k, v := range fields {
+		errMap[k] = []string{v}
+	}
+	return &AppError{
+		Status:  fiber.StatusUnprocessableEntity,
+		Code:    CodeValidation,
+		Message: "Validasi gagal",
+		Fields:  fields,
+		Errors:  errMap,
+	}
 }
+
+func ValidationErrors(errors map[string][]string) *AppError {
+	return &AppError{
+		Status:  fiber.StatusUnprocessableEntity,
+		Code:    CodeValidation,
+		Message: "Validasi gagal",
+		Errors:  errors,
+	}
+}
+
+func ValidationField(field string, message string) *AppError {
+	return &AppError{
+		Status:  fiber.StatusUnprocessableEntity,
+		Code:    CodeValidation,
+		Message: "Validasi gagal",
+		Errors:  map[string][]string{field: {message}},
+	}
+}
+
 func NotAcceptable(message string) *AppError {
-	return &AppError{fiber.StatusNotAcceptable, CodeNotAcceptable, message, nil, nil}
+	return &AppError{Status: fiber.StatusNotAcceptable, Code: CodeNotAcceptable, Message: message}
 }
+
 func UnsupportedMediaType(message string) *AppError {
-	return &AppError{fiber.StatusUnsupportedMediaType, CodeUnsupportedMediaType, message, nil, nil}
+	return &AppError{Status: fiber.StatusUnsupportedMediaType, Code: CodeUnsupportedMediaType, Message: message}
 }
+
 func TooManyRequests(message string) *AppError {
-	return &AppError{fiber.StatusTooManyRequests, CodeTooManyRequests, message, nil, nil}
+	return &AppError{Status: fiber.StatusTooManyRequests, Code: CodeTooManyRequests, Message: message}
 }
+
 func Internal(cause error) *AppError {
-	return &AppError{fiber.StatusInternalServerError, CodeInternal, "terjadi kesalahan pada server", nil, cause}
+	return &AppError{
+		Status:  fiber.StatusInternalServerError,
+		Code:    CodeInternal,
+		Message: "Terjadi kesalahan internal pada server",
+		cause:   cause,
+	}
 }
 
 func Fail(_ *fiber.Ctx, status int, message string) error {
@@ -80,8 +125,10 @@ func Fail(_ *fiber.Ctx, status int, message string) error {
 		return Conflict(message)
 	case fiber.StatusUnsupportedMediaType:
 		return UnsupportedMediaType(message)
+	case fiber.StatusTooManyRequests:
+		return TooManyRequests(message)
 	case fiber.StatusUnprocessableEntity:
-		return Validation(map[string]string{"_": message})
+		return ValidationField("general", message)
 	default:
 		return Internal(nil)
 	}

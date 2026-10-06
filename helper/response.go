@@ -18,12 +18,17 @@ func SuccessList(c *fiber.Ctx, message string, data interface{}, meta model.Meta
 		Success: true,
 		Message: message,
 		Data:    data,
-		Meta:    meta,
+		Meta:    &meta,
 	})
 }
 
 func SuccessCursor(c *fiber.Ctx, message string, data interface{}, meta model.CursorMeta) error {
-	return c.Status(fiber.StatusOK).JSON(model.WebResponse{Success: true, Message: message, Data: data, Meta: meta})
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"success": true,
+		"message": message,
+		"data":    data,
+		"meta":    meta,
+	})
 }
 
 func Created(c *fiber.Ctx, message string, data interface{}) error {

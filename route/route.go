@@ -1,6 +1,7 @@
 package route
 
 import (
+	"api-students/app/model"
 	"api-students/app/service"
 	"api-students/helper"
 	"api-students/middleware"
@@ -13,11 +14,10 @@ func RegisterRoutes(
 	app *fiber.App,
 	db *pgxpool.Pool,
 	studentService *service.StudentService,
-	prestasiService *service.PrestasiService,
+	courseService *service.CourseService,
+	enrollmentService *service.EnrollmentService,
 	authService *service.AuthService,
-	userService *service.UserService,
 	jwtManager *helper.JWTManager,
-	perms *helper.PermissionSet,
 ) {
 	// Health check - public
 	app.Get("/health", func(c *fiber.Ctx) error {
@@ -36,22 +36,21 @@ func RegisterRoutes(
 
 	// Root endpoint - public
 	app.Get("/", func(c *fiber.Ctx) error {
-		return c.SendString("API Students")
+		return c.JSON(fiber.Map{
+			"success": true,
+			"message": "SIAKAD Mini RESTful API Back End",
+			"version": "1.0.0",
+		})
 	})
 
 	api := app.Group("/api/v1")
 
-	// =========================
-	// AUTHENTICATION
-	// =========================
+	// ==========================================
+	// 1. AUTHENTICATION ENDPOINTS
+	// ==========================================
 	auth := api.Group("/auth")
 
-	auth.Post(
-		"/register",
-		middleware.RequireJSON(),
-		authService.Register,
-	)
-
+	// Endpoint 1: POST /api/v1/auth/login (Publik, Rate Limited 5x/menit)
 	auth.Post(
 		"/login",
 		middleware.RequireJSON(),
@@ -59,83 +58,94 @@ func RegisterRoutes(
 		authService.Login,
 	)
 
-	auth.Post(
-		"/refresh",
-		middleware.RequireJSON(),
-		authService.Refresh,
-	)
-
-	auth.Post(
-		"/logout",
-		middleware.RequireJSON(),
-		authService.Logout,
-	)
-
+	// Endpoint 2: GET /api/v1/auth/me (Semua Role)
 	auth.Get(
 		"/me",
 		middleware.RequireAuth(jwtManager),
 		authService.Me,
 	)
 
-	users := api.Group(
-		"/users",
-		middleware.RequireAuth(jwtManager),
-	)
+	auth.Post("/refresh", middleware.RequireJSON(), authService.Refresh)
+	auth.Post("/logout", authService.Logout)
 
-	users.Get("/", middleware.RequirePermission(perms, "user:list"), userService.List)
-	users.Post("/", middleware.RequireJSON(), middleware.RequirePermission(perms, "user:update:any"), userService.Create)
-	users.Get("/:id", userService.Get)
-	users.Put("/:id", middleware.RequireJSON(), userService.Replace)
-	users.Patch("/:id", middleware.RequireJSON(), userService.Patch)
-	users.Delete("/:id", middleware.RequirePermission(perms, "user:delete"), userService.Delete)
-	users.Patch("/:id/role", middleware.RequireJSON(), middleware.RequirePermission(perms, "role:assign"), userService.AssignRole)
-
-	// =========================
-	// STUDENTS - PROTECTED
-	// =========================
+	// ==========================================
+	// 2. STUDENTS ENDPOINTS (Admin & Mahasiswa)
+	// ==========================================
 	students := api.Group(
 		"/students",
 		middleware.RequireAuth(jwtManager),
 	)
 
+	// Endpoint 3: GET /api/v1/students (Admin only)
 	students.Get(
 		"/",
-		middleware.RequirePermission(perms, "student:list"),
+		middleware.RequireRole(model.RoleAdmin),
 		studentService.GetStudents,
 	)
 
-	students.Get(
-		"/:nim/prestasi",
-		prestasiService.GetByStudentNIM,
+	// Endpoint 4: POST /api/v1/students (Admin only)
+	students.Post(
+		"/",
+		middleware.RequireJSON(),
+		middleware.RequireRole(model.RoleAdmin),
+		studentService.CreateStudent,
 	)
 
+	// Endpoint 5: GET /api/v1/students/:id (Admin & Mahasiswa Data Sendiri)
 	students.Get(
 		"/:id",
 		studentService.GetStudent,
 	)
 
-	students.Post(
-		"/",
-		middleware.RequireJSON(),
-		middleware.RequirePermission(perms, "student:create"),
-		studentService.CreateStudent,
-	)
-
+	// Endpoint 6: PUT /api/v1/students/:id (Admin only)
 	students.Put(
 		"/:id",
 		middleware.RequireJSON(),
+		middleware.RequireRole(model.RoleAdmin),
 		studentService.UpdateStudent,
 	)
 
-	students.Patch(
-		"/:id",
-		middleware.RequireJSON(),
-		studentService.PatchStudent,
-	)
-
+	// Endpoint 7: DELETE /api/v1/students/:id (Admin only - Soft Delete)
 	students.Delete(
 		"/:id",
-		middleware.RequirePermission(perms, "student:delete"),
+		middleware.RequireRole(model.RoleAdmin),
 		studentService.DeleteStudent,
+	)
+
+	// ==========================================
+	// 3. COURSES ENDPOINTS (Semua Role)
+	// ==========================================
+	courses := api.Group(
+		"/courses",
+		middleware.RequireAuth(jwtManager),
+	)
+
+	// Endpoint 8: GET /api/v1/courses (Semua Role)
+	courses.Get(
+		"/",
+		courseService.GetCourses,
+	)
+
+	// ==========================================
+	// 4. ENROLLMENTS (KRS) ENDPOINTS (Mahasiswa)
+	// ==========================================
+	enrollments := api.Group(
+		"/enrollments",
+		middleware.RequireAuth(jwtManager),
+	)
+
+	// Endpoint 9: POST /api/v1/enrollments (Mahasiswa only)
+	enrollments.Post(
+		"/",
+		middleware.RequireJSON(),
+		middleware.RequireRole(model.RoleMahasiswa),
+		enrollmentService.CreateEnrollment,
+	)
+
+	// Endpoint 10: DELETE /api/v1/enrollments/:id (Mahasiswa milik sendiri)
+	enrollments.Delete(
+		"/:id",
+		middleware.RequireRole(model.RoleMahasiswa),
+		enrollmentService.DeleteEnrollment,
 	)
 }

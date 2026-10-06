@@ -1,230 +1,191 @@
 package service
 
 import (
-	"errors"
 	"strconv"
-	"strings"
+	"time"
 
 	"api-students/app/model"
 	"api-students/app/repository"
 	"api-students/helper"
 
 	"github.com/gofiber/fiber/v2"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type StudentService struct {
-	repo  repository.StudentRepository
-	perms *helper.PermissionSet
+	repo *repository.StudentRepository
 }
 
-func NewStudentService(repo repository.StudentRepository, perms *helper.PermissionSet) *StudentService {
-	return &StudentService{repo: repo, perms: perms}
+func NewStudentService(repo *repository.StudentRepository) *StudentService {
+	return &StudentService{
+		repo: repo,
+	}
 }
 
+// Endpoint 3: GET /api/v1/students (Admin only)
 func (s *StudentService) GetStudents(c *fiber.Ctx) error {
-	format, err := helper.Negotiate(c, fiber.MIMEApplicationJSON, helper.FormatCSV)
+	page, _ := strconv.Atoi(c.Query("page", "1"))
+	if page < 1 {
+		page = 1
+	}
+
+	perPage, _ := strconv.Atoi(c.Query("per_page", "10"))
+	if perPage <= 0 {
+		perPage = 10
+	}
+	if perPage > 50 {
+		perPage = 50
+	}
+
+	angkatan, _ := strconv.Atoi(c.Query("angkatan", "0"))
+
+	query := model.StudentListQuery{
+		Page:     page,
+		PerPage:  perPage,
+		Prodi:    c.Query("prodi"),
+		Angkatan: angkatan,
+		Search:   c.Query("search"),
+		Sort:     c.Query("sort", "nama"),
+	}
+
+	students, total, err := s.repo.List(c.Context(), query)
 	if err != nil {
 		return err
 	}
-	limit := c.QueryInt("limit", 10)
-	if limit < 1 {
-		limit = 10
+
+	lastPage := 0
+	if total > 0 {
+		lastPage = (total + perPage - 1) / perPage
 	}
-	if limit > 100 {
-		limit = 100
+
+	meta := model.Meta{
+		CurrentPage: page,
+		PerPage:     perPage,
+		Total:       total,
+		LastPage:    lastPage,
 	}
-	query := model.StudentCursorQuery{Limit: limit, Search: strings.TrimSpace(c.Query("search"))}
-	if raw := strings.TrimSpace(c.Query("cursor")); raw != "" {
-		cur, e := helper.DecodeCursor(raw)
-		if e != nil {
-			return helper.BadRequest("cursor tidak valid")
-		}
-		query.After = &cur
+
+	return helper.SuccessList(c, "Data mahasiswa berhasil diambil", students, meta)
+}
+
+// Endpoint 4: POST /api/v1/students (Admin only)
+func (s *StudentService) CreateStudent(c *fiber.Ctx) error {
+	var req model.CreateStudentRequest
+	if err := c.BodyParser(&req); err != nil {
+		return helper.BadRequest("Format JSON tidak valid")
 	}
-	if raw := c.Query("is_active"); raw != "" {
-		if raw != "true" && raw != "false" {
-			return helper.BadRequest("is_active tidak valid")
-		}
-		v := raw == "true"
-		query.IsActive = &v
+
+	if valErrors := helper.ValidateStruct(req); len(valErrors) > 0 {
+		return helper.Validation(valErrors)
 	}
-	students, err := s.repo.FindAfterCursor(c.Context(), query)
+
+	// Validate angkatan <= current year
+	currentYear := time.Now().Year()
+	if req.Angkatan > currentYear {
+		return helper.ValidationField("angkatan", "Angkatan tidak boleh melebihi tahun berjalan")
+	}
+
+	// Generate default password hash = hash(NIM)
+	passHash, err := bcrypt.GenerateFromPassword([]byte(req.NIM), bcrypt.DefaultCost)
 	if err != nil {
 		return helper.Internal(err)
 	}
-	hasMore := len(students) > limit
-	if hasMore {
-		students = students[:limit]
+
+	student, err := s.repo.CreateWithUserInTx(c.Context(), req, string(passHash))
+	if err != nil {
+		return err
 	}
-	meta := model.CursorMeta{Limit: limit, HasMore: hasMore}
-	if hasMore {
-		last := students[len(students)-1]
-		meta.NextCursor = helper.EncodeCursor(last.CreatedAt, last.ID)
-	}
-	if format == helper.FormatCSV {
-		return helper.WriteStudentsCSV(c, students)
-	}
-	return helper.SuccessCursor(c, "Students retrieved successfully", students, meta)
+
+	c.Set("Location", "/api/v1/students/"+strconv.Itoa(student.ID))
+	return helper.Created(c, "Data mahasiswa berhasil ditambahkan", student)
 }
 
+// Endpoint 5: GET /api/v1/students/:id (Admin, Mahasiswa data sendiri)
 func (s *StudentService) GetStudent(c *fiber.Ctx) error {
 	id, err := strconv.Atoi(c.Params("id"))
-	if err != nil {
-		return helper.BadRequest("Invalid student ID")
+	if err != nil || id <= 0 {
+		return helper.BadRequest("ID mahasiswa tidak valid")
 	}
 
 	student, err := s.repo.FindByID(c.Context(), id)
 	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			return helper.NotFound("Student not found")
+		return err
+	}
+
+	// Authorization check: if role is mahasiswa, ensure it's their own data
+	authUser, ok := helper.CurrentUser(c)
+	if !ok {
+		return helper.Unauthorized("belum terautentikasi")
+	}
+
+	if authUser.Role == model.RoleMahasiswa {
+		if student.UserID != authUser.UserID {
+			return helper.Forbidden("tidak memiliki akses ke data mahasiswa lain")
 		}
-		return helper.Internal(err)
-	}
-	current, ok := helper.CurrentUser(c)
-	if !ok {
-		return helper.Unauthorized("belum terautentikasi")
-	}
-	if !CanAccessStudent(current, student.OwnerID, s.perms, "student:read:any") {
-		return helper.Forbidden("tidak berhak mengakses data student ini")
 	}
 
-	return helper.Success(c, fiber.StatusOK, "Student retrieved successfully", student)
-}
-
-func (s *StudentService) CreateStudent(c *fiber.Ctx) error {
-	current, ok := helper.CurrentUser(c)
-	if !ok {
-		return helper.Unauthorized("belum terautentikasi")
-	}
-	var req model.CreateStudentRequest
-
-	if err := c.BodyParser(&req); err != nil {
-		return helper.BadRequest("Invalid JSON body")
-	}
-
-	if errs := helper.ValidateStruct(req); errs != nil {
-		return helper.Validation(errs)
-	}
-
-	student, err := s.repo.Create(c.Context(), &req, current.UserID)
+	// Fetch enrolled courses and calculate SKS
+	enrolledCourses, totalSKS, err := s.repo.GetEnrolledCourses(c.Context(), student.ID)
 	if err != nil {
-		if errors.Is(err, repository.ErrDuplicate) {
-			return helper.Conflict("NIM already exists")
-		}
-		return helper.Internal(err)
+		return err
 	}
 
-	c.Location("/api/v1/students/" + strconv.Itoa(student.ID))
-	return helper.Created(c, "Student created successfully", student)
+	batasSKS := model.CalculateBatasSKS(student.IPKTerakhir)
+
+	resp := model.StudentDetailResponse{
+		ID:          student.ID,
+		NIM:         student.NIM,
+		Nama:        student.Nama,
+		Prodi:       student.Prodi,
+		Angkatan:    student.Angkatan,
+		IPKTerakhir: student.IPKTerakhir,
+		TotalSKS:    totalSKS,
+		BatasSKS:    batasSKS,
+		MataKuliah:  enrolledCourses,
+	}
+
+	return helper.Success(c, fiber.StatusOK, "Detail mahasiswa berhasil diambil", resp)
 }
 
+// Endpoint 6: PUT /api/v1/students/:id (Admin only)
 func (s *StudentService) UpdateStudent(c *fiber.Ctx) error {
 	id, err := strconv.Atoi(c.Params("id"))
-	if err != nil {
-		return helper.BadRequest("Invalid student ID")
-	}
-	if _, allowed := s.authorizeStudentUpdate(c, id); !allowed {
-		return nil
+	if err != nil || id <= 0 {
+		return helper.BadRequest("ID mahasiswa tidak valid")
 	}
 
-	var req model.ReplaceStudentRequest
+	var req model.UpdateStudentRequest
 	if err := c.BodyParser(&req); err != nil {
-		return helper.BadRequest("Invalid JSON body")
+		return helper.BadRequest("Format JSON tidak valid")
 	}
 
-	if errs := helper.ValidateStruct(req); errs != nil {
-		return helper.Validation(errs)
+	if valErrors := helper.ValidateStruct(req); len(valErrors) > 0 {
+		return helper.Validation(valErrors)
 	}
 
-	student, err := s.repo.Update(c.Context(), id, &req)
+	currentYear := time.Now().Year()
+	if req.Angkatan > currentYear {
+		return helper.ValidationField("angkatan", "Angkatan tidak boleh melebihi tahun berjalan")
+	}
+
+	student, err := s.repo.Update(c.Context(), id, req)
 	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			return helper.NotFound("Student not found")
-		}
-		if errors.Is(err, repository.ErrDuplicate) {
-			return helper.Conflict("NIM already exists")
-		}
-		return helper.Internal(err)
+		return err
 	}
 
-	return helper.Success(c, fiber.StatusOK, "Student updated successfully", student)
+	return helper.Success(c, fiber.StatusOK, "Data mahasiswa berhasil diperbarui", student)
 }
 
-func (s *StudentService) PatchStudent(c *fiber.Ctx) error {
-	id, err := strconv.Atoi(c.Params("id"))
-	if err != nil {
-		return helper.BadRequest("Invalid student ID")
-	}
-	if _, allowed := s.authorizeStudentUpdate(c, id); !allowed {
-		return nil
-	}
-
-	var req model.PatchStudentRequest
-	if err := c.BodyParser(&req); err != nil {
-		return helper.BadRequest("Invalid JSON body")
-	}
-
-	if IsEmptyPatch(&req) {
-		return helper.BadRequest("No fields to update")
-	}
-	if errs := helper.ValidateStruct(req); errs != nil {
-		return helper.Validation(errs)
-	}
-
-	student, err := s.repo.Patch(c.Context(), id, &req)
-	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			return helper.NotFound("Student not found")
-		}
-		if errors.Is(err, repository.ErrDuplicate) {
-			return helper.Conflict("NIM already exists")
-		}
-		// "no fields to update" guard from repository (fallback)
-		if strings.Contains(err.Error(), "no fields to update") {
-			return helper.BadRequest("No fields to update")
-		}
-		return helper.Internal(err)
-	}
-
-	return helper.Success(c, fiber.StatusOK, "Student patched successfully", student)
-}
-
+// Endpoint 7: DELETE /api/v1/students/:id (Admin only - soft delete)
 func (s *StudentService) DeleteStudent(c *fiber.Ctx) error {
 	id, err := strconv.Atoi(c.Params("id"))
-	if err != nil {
-		return helper.BadRequest("Invalid student ID")
+	if err != nil || id <= 0 {
+		return helper.BadRequest("ID mahasiswa tidak valid")
 	}
 
-	deleted, err := s.repo.Delete(c.Context(), id)
-	if err != nil {
-		return helper.Internal(err)
-	}
-
-	if !deleted {
-		return helper.NotFound("Student not found")
+	if err := s.repo.SoftDelete(c.Context(), id); err != nil {
+		return err
 	}
 
 	return helper.NoContent(c)
-}
-
-func (s *StudentService) authorizeStudentUpdate(c *fiber.Ctx, id int) (model.Student, bool) {
-	current, ok := helper.CurrentUser(c)
-	if !ok {
-		helper.Unauthorized("belum terautentikasi")
-		return model.Student{}, false
-	}
-	existingStudent, err := s.repo.FindByID(c.Context(), id)
-	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			helper.NotFound("Student not found")
-			return model.Student{}, false
-		}
-		helper.Internal(err)
-		return model.Student{}, false
-	}
-	if !CanAccessStudent(current, existingStudent.OwnerID, s.perms, "student:update:any") {
-		helper.Forbidden("tidak berhak mengubah data student ini")
-		return model.Student{}, false
-	}
-	return existingStudent, true
 }

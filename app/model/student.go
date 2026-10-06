@@ -3,62 +3,68 @@ package model
 import "time"
 
 type Student struct {
-	ID        int       `json:"id"`
-	NIM       string    `json:"nim" validate:"required,nim"`
-	Name      string    `json:"name" validate:"required,max=120"`
-	Grade     float64   `json:"grade"`
-	IsActive  bool      `json:"is_active"`
-	OwnerID   int       `json:"owner_id"`
-	CreatedAt time.Time `json:"created_at"`
+	ID          int        `json:"id"`
+	UserID      int        `json:"user_id,omitempty"`
+	NIM         string     `json:"nim" validate:"required,len=12,numeric"`
+	Nama        string     `json:"nama" validate:"required,max=120"`
+	Prodi       string     `json:"prodi" validate:"required,max=100"`
+	Angkatan    int        `json:"angkatan" validate:"required,min=1900"`
+	IPKTerakhir float64    `json:"ipk_terakhir" validate:"gte=0,lte=4"`
+	DeletedAt   *time.Time `json:"deleted_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at,omitempty"`
 }
 
-type StudentCursorQuery struct {
-	Limit    int
-	After    *Cursor
-	Search   string
-	IsActive *bool
+type StudentListItem struct {
+	ID          int     `json:"id"`
+	NIM         string  `json:"nim"`
+	Nama        string  `json:"nama"`
+	Prodi       string  `json:"prodi"`
+	Angkatan    int     `json:"angkatan"`
+	IPKTerakhir float64 `json:"ipk_terakhir"`
+}
+
+type StudentDetailResponse struct {
+	ID          int                  `json:"id"`
+	NIM         string               `json:"nim"`
+	Nama        string               `json:"nama"`
+	Prodi       string               `json:"prodi"`
+	Angkatan    int                  `json:"angkatan"`
+	IPKTerakhir float64              `json:"ipk_terakhir"`
+	TotalSKS    int                  `json:"total_sks"`
+	BatasSKS    int                  `json:"batas_sks"`
+	MataKuliah  []EnrolledCourseItem `json:"mata_kuliah"`
 }
 
 type CreateStudentRequest struct {
-	NIM      string  `json:"nim" validate:"required,nim"`
-	Name     string  `json:"name" validate:"required,max=120"`
-	Grade    float64 `json:"grade"`
-	IsActive bool    `json:"is_active"`
+	NIM         string   `json:"nim" validate:"required,len=12,numeric"`
+	Nama        string   `json:"nama" validate:"required,min=2,max=120"`
+	Email       string   `json:"email" validate:"required,email,max=120"`
+	Prodi       string   `json:"prodi" validate:"required,min=2,max=100"`
+	Angkatan    int      `json:"angkatan" validate:"required,min=1900"`
+	IPKTerakhir *float64 `json:"ipk_terakhir,omitempty" validate:"omitempty,gte=0,lte=4"`
 }
 
-type ReplaceStudentRequest struct {
-	NIM      string  `json:"nim"`
-	Name     string  `json:"name"`
-	Grade    float64 `json:"grade"`
-	IsActive bool    `json:"is_active"`
+type UpdateStudentRequest struct {
+	Nama        string   `json:"nama" validate:"required,min=2,max=120"`
+	Prodi       string   `json:"prodi" validate:"required,min=2,max=100"`
+	Angkatan    int      `json:"angkatan" validate:"required,min=1900"`
+	IPKTerakhir *float64 `json:"ipk_terakhir,omitempty" validate:"omitempty,gte=0,lte=4"`
 }
 
-type PatchStudentRequest struct {
-	NIM      *string  `json:"nim,omitempty" validate:"omitnil,nim"`
-	Name     *string  `json:"name,omitempty" validate:"omitnil,required,max=120"`
-	Grade    *float64 `json:"grade,omitempty"`
-	IsActive *bool    `json:"is_active,omitempty"`
-}
-
-type WebResponse struct {
-	Success bool        `json:"success"`
-	Message string      `json:"message"`
-	Data    interface{} `json:"data,omitempty"`
-	Meta    interface{} `json:"meta,omitempty"`
-}
-
-type Meta struct {
-	Page       int `json:"page"`
-	Limit      int `json:"limit"`
-	Total      int `json:"total"`
-	TotalPages int `json:"total_pages"`
-}
-
-type ListQuery struct {
+type StudentListQuery struct {
 	Page     int
-	Limit    int
+	PerPage  int
+	Prodi    string
+	Angkatan int
 	Search   string
-	SortBy   string
-	Order    string
-	IsActive string
+	Sort     string
+}
+
+func CalculateBatasSKS(ipk float64) int {
+	if ipk >= 3.00 {
+		return 24
+	} else if ipk >= 2.50 {
+		return 21
+	}
+	return 18
 }

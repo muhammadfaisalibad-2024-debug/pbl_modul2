@@ -7,334 +7,367 @@ import (
 	"strings"
 
 	"api-students/app/model"
+	"api-students/helper"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Sentinel errors for service layer mapping.
-var (
-	ErrNotFound  = errors.New("student not found")
-	ErrDuplicate = errors.New("NIM already exists")
-)
-
-type StudentRepository interface {
-	FindAll(ctx context.Context, page, limit int, search, sortBy, order, active string) ([]model.Student, int, error)
-	FindAfterCursor(ctx context.Context, q model.StudentCursorQuery) ([]model.Student, error)
-	FindByID(ctx context.Context, id int) (model.Student, error)
-	FindByNIM(ctx context.Context, nim string) (model.Student, error)
-	Create(ctx context.Context, req *model.CreateStudentRequest, ownerID int) (model.Student, error)
-	Update(ctx context.Context, id int, req *model.ReplaceStudentRequest) (model.Student, error)
-	Patch(ctx context.Context, id int, req *model.PatchStudentRequest) (model.Student, error)
-	Delete(ctx context.Context, id int) (bool, error)
-}
-
-type studentRepository struct {
+type StudentRepository struct {
 	db *pgxpool.Pool
 }
 
-func NewStudentRepository(db *pgxpool.Pool) StudentRepository {
-	return &studentRepository{db: db}
+func NewStudentRepository(db *pgxpool.Pool) *StudentRepository {
+	return &StudentRepository{db: db}
 }
 
-func (r *studentRepository) FindAfterCursor(ctx context.Context, q model.StudentCursorQuery) ([]model.Student, error) {
-	args := []any{}
-	where := " WHERE 1=1"
+func (r *StudentRepository) List(ctx context.Context, q model.StudentListQuery) ([]model.StudentListItem, int, error) {
+	var conditions []string
+	var args []interface{}
+	argIdx := 1
+
+	conditions = append(conditions, "deleted_at IS NULL")
+
+	if q.Prodi != "" {
+		conditions = append(conditions, fmt.Sprintf("LOWER(prodi) = LOWER($%d)", argIdx))
+		args = append(args, q.Prodi)
+		argIdx++
+	}
+
+	if q.Angkatan > 0 {
+		conditions = append(conditions, fmt.Sprintf("angkatan = $%d", argIdx))
+		args = append(args, q.Angkatan)
+		argIdx++
+	}
+
 	if q.Search != "" {
-		args = append(args, "%"+q.Search+"%")
-		where += fmt.Sprintf(" AND (name ILIKE $%d OR nim ILIKE $%d)", len(args), len(args))
-	}
-	if q.IsActive != nil {
-		args = append(args, *q.IsActive)
-		where += fmt.Sprintf(" AND is_active=$%d", len(args))
-	}
-	if q.After != nil {
-		args = append(args, q.After.CreatedAt, q.After.ID)
-		where += fmt.Sprintf(" AND (created_at,id)<($%d,$%d)", len(args)-1, len(args))
-	}
-	args = append(args, q.Limit+1)
-	rows, err := r.db.Query(ctx, "SELECT id,nim,name,grade,is_active,COALESCE(owner_id,0),created_at FROM students"+where+fmt.Sprintf(" ORDER BY created_at DESC,id DESC LIMIT $%d", len(args)), args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	result := []model.Student{}
-	for rows.Next() {
-		var s model.Student
-		if err := rows.Scan(&s.ID, &s.NIM, &s.Name, &s.Grade, &s.IsActive, &s.OwnerID, &s.CreatedAt); err != nil {
-			return nil, err
-		}
-		result = append(result, s)
-	}
-	return result, rows.Err()
-}
-
-func (r *studentRepository) FindAll(ctx context.Context, page, limit int, search, sortBy, order, active string) ([]model.Student, int, error) {
-	sortColumns := map[string]string{
-		"id":    "id",
-		"name":  "name",
-		"grade": "grade",
+		conditions = append(conditions, fmt.Sprintf("(nim ILIKE '%%' || $%d || '%%' OR nama ILIKE '%%' || $%d || '%%')", argIdx, argIdx))
+		args = append(args, q.Search)
+		argIdx++
 	}
 
-	sortColumn, ok := sortColumns[sortBy]
-	if !ok {
-		sortColumn = "id"
-	}
+	whereClause := strings.Join(conditions, " AND ")
 
-	if order != "desc" {
-		order = "asc"
-	}
-
-	offset := (page - 1) * limit
-
-	where := []string{"1=1"}
-	args := []interface{}{}
-	argNumber := 1
-
-	if search != "" {
-		where = append(
-			where,
-			fmt.Sprintf("(LOWER(name) LIKE $%d OR LOWER(nim) LIKE $%d)", argNumber, argNumber),
-		)
-		args = append(args, "%"+search+"%")
-		argNumber++
-	}
-
-	if active != "" {
-		isActive := active == "true"
-		if active == "true" || active == "false" {
-			where = append(where, fmt.Sprintf("is_active = $%d", argNumber))
-			args = append(args, isActive)
-			argNumber++
-		}
-	}
-
-	whereClause := strings.Join(where, " AND ")
-
+	// Count query
 	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM students WHERE %s", whereClause)
-
 	var total int
-	if err := r.db.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
-		return nil, 0, err
+	err := r.db.QueryRow(ctx, countQuery, args...).Scan(&total)
+	if err != nil {
+		return nil, 0, helper.Internal(err)
 	}
 
-	query := fmt.Sprintf(`
-		SELECT id, nim, name, grade, is_active, COALESCE(owner_id, 0)
+	// Order by
+	orderBy := "nama ASC, id ASC"
+	switch q.Sort {
+	case "-ipk_terakhir":
+		orderBy = "ipk_terakhir DESC, id ASC"
+	case "ipk_terakhir":
+		orderBy = "ipk_terakhir ASC, id ASC"
+	case "-nama":
+		orderBy = "nama DESC, id ASC"
+	case "nama":
+		orderBy = "nama ASC, id ASC"
+	}
+
+	if q.PerPage <= 0 {
+		q.PerPage = 10
+	}
+	if q.PerPage > 50 {
+		q.PerPage = 50
+	}
+	if q.Page <= 0 {
+		q.Page = 1
+	}
+
+	offset := (q.Page - 1) * q.PerPage
+
+	selectQuery := fmt.Sprintf(`
+		SELECT id, nim, nama, prodi, angkatan, COALESCE(ipk_terakhir, 0.00)
 		FROM students
 		WHERE %s
-		ORDER BY %s %s
+		ORDER BY %s
 		LIMIT $%d OFFSET $%d
-	`, whereClause, sortColumn, order, argNumber, argNumber+1)
+	`, whereClause, orderBy, argIdx, argIdx+1)
 
-	args = append(args, limit, offset)
+	args = append(args, q.PerPage, offset)
 
-	rows, err := r.db.Query(ctx, query, args...)
+	rows, err := r.db.Query(ctx, selectQuery, args...)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, helper.Internal(err)
 	}
 	defer rows.Close()
 
-	result := make([]model.Student, 0)
+	items := make([]model.StudentListItem, 0)
 	for rows.Next() {
-		var student model.Student
-		if err := rows.Scan(
-			&student.ID,
-			&student.NIM,
-			&student.Name,
-			&student.Grade,
-			&student.IsActive,
-			&student.OwnerID,
-		); err != nil {
-			return nil, 0, err
+		var item model.StudentListItem
+		err := rows.Scan(
+			&item.ID,
+			&item.NIM,
+			&item.Nama,
+			&item.Prodi,
+			&item.Angkatan,
+			&item.IPKTerakhir,
+		)
+		if err != nil {
+			return nil, 0, helper.Internal(err)
 		}
-		result = append(result, student)
+		items = append(items, item)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, 0, err
+		return nil, 0, helper.Internal(err)
 	}
 
-	return result, total, nil
+	return items, total, nil
 }
 
-func (r *studentRepository) FindByID(ctx context.Context, id int) (model.Student, error) {
-	var student model.Student
-	err := r.db.QueryRow(
-		ctx,
-		`SELECT id, nim, name, grade, is_active, COALESCE(owner_id, 0)
-		 FROM students
-		 WHERE id = $1`,
-		id,
-	).Scan(
-		&student.ID,
-		&student.NIM,
-		&student.Name,
-		&student.Grade,
-		&student.IsActive,
-		&student.OwnerID,
+func (r *StudentRepository) FindByID(ctx context.Context, id int) (*model.Student, error) {
+	query := `
+		SELECT id, COALESCE(user_id, 0), nim, nama, prodi, angkatan, COALESCE(ipk_terakhir, 0.00), deleted_at, created_at
+		FROM students
+		WHERE id = $1 AND deleted_at IS NULL
+	`
+	var s model.Student
+	err := r.db.QueryRow(ctx, query, id).Scan(
+		&s.ID,
+		&s.UserID,
+		&s.NIM,
+		&s.Nama,
+		&s.Prodi,
+		&s.Angkatan,
+		&s.IPKTerakhir,
+		&s.DeletedAt,
+		&s.CreatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return model.Student{}, ErrNotFound
+			return nil, helper.NotFound("data mahasiswa tidak ditemukan atau sudah dihapus")
 		}
-		return model.Student{}, err
+		return nil, helper.Internal(err)
 	}
-	return student, nil
+	return &s, nil
 }
 
-func (r *studentRepository) FindByNIM(ctx context.Context, nim string) (model.Student, error) {
-	var student model.Student
-	err := r.db.QueryRow(ctx, `
-		SELECT id, nim, name, grade, is_active, COALESCE(owner_id, 0)
-		FROM students WHERE nim = $1`, nim).Scan(
-		&student.ID, &student.NIM, &student.Name, &student.Grade,
-		&student.IsActive, &student.OwnerID,
+func (r *StudentRepository) FindByUserID(ctx context.Context, userID int) (*model.Student, error) {
+	query := `
+		SELECT id, COALESCE(user_id, 0), nim, nama, prodi, angkatan, COALESCE(ipk_terakhir, 0.00), deleted_at, created_at
+		FROM students
+		WHERE user_id = $1 AND deleted_at IS NULL
+	`
+	var s model.Student
+	err := r.db.QueryRow(ctx, query, userID).Scan(
+		&s.ID,
+		&s.UserID,
+		&s.NIM,
+		&s.Nama,
+		&s.Prodi,
+		&s.Angkatan,
+		&s.IPKTerakhir,
+		&s.DeletedAt,
+		&s.CreatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return model.Student{}, ErrNotFound
+			return nil, helper.NotFound("data mahasiswa tidak ditemukan")
 		}
-		return model.Student{}, err
+		return nil, helper.Internal(err)
 	}
-	return student, nil
+	return &s, nil
 }
 
-func (r *studentRepository) Create(ctx context.Context, req *model.CreateStudentRequest, ownerID int) (model.Student, error) {
-	var student model.Student
-	err := r.db.QueryRow(
-		ctx,
-		`INSERT INTO students (nim, name, grade, is_active, owner_id)
-		 VALUES ($1, $2, $3, $4, $5)
-		 RETURNING id, nim, name, grade, is_active, owner_id`,
-		req.NIM,
-		req.Name,
-		req.Grade,
-		req.IsActive,
-		ownerID,
-	).Scan(
-		&student.ID,
-		&student.NIM,
-		&student.Name,
-		&student.Grade,
-		&student.IsActive,
-		&student.OwnerID,
-	)
-	if err != nil {
-		if strings.Contains(err.Error(), "students_nim_key") {
-			return model.Student{}, ErrDuplicate
-		}
-		return model.Student{}, err
-	}
-	return student, nil
-}
-
-func (r *studentRepository) Update(ctx context.Context, id int, req *model.ReplaceStudentRequest) (model.Student, error) {
-	var student model.Student
-	err := r.db.QueryRow(
-		ctx,
-		`UPDATE students
-		 SET nim = $1,
-		     name = $2,
-		     grade = $3,
-		     is_active = $4
-		 WHERE id = $5
-		 RETURNING id, nim, name, grade, is_active, COALESCE(owner_id, 0)`,
-		req.NIM,
-		req.Name,
-		req.Grade,
-		req.IsActive,
-		id,
-	).Scan(
-		&student.ID,
-		&student.NIM,
-		&student.Name,
-		&student.Grade,
-		&student.IsActive,
-		&student.OwnerID,
+func (r *StudentRepository) FindByNIM(ctx context.Context, nim string) (*model.Student, error) {
+	query := `
+		SELECT id, COALESCE(user_id, 0), nim, nama, prodi, angkatan, COALESCE(ipk_terakhir, 0.00), deleted_at, created_at
+		FROM students
+		WHERE nim = $1 AND deleted_at IS NULL
+	`
+	var s model.Student
+	err := r.db.QueryRow(ctx, query, nim).Scan(
+		&s.ID,
+		&s.UserID,
+		&s.NIM,
+		&s.Nama,
+		&s.Prodi,
+		&s.Angkatan,
+		&s.IPKTerakhir,
+		&s.DeletedAt,
+		&s.CreatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return model.Student{}, ErrNotFound
+			return nil, helper.NotFound("data mahasiswa tidak ditemukan")
 		}
-		if strings.Contains(err.Error(), "students_nim_key") {
-			return model.Student{}, ErrDuplicate
-		}
-		return model.Student{}, err
+		return nil, helper.Internal(err)
 	}
-	return student, nil
+	return &s, nil
 }
 
-func (r *studentRepository) Patch(ctx context.Context, id int, req *model.PatchStudentRequest) (model.Student, error) {
-	setParts := []string{}
-	args := []interface{}{}
-	argNumber := 1
+func (r *StudentRepository) CreateWithUserInTx(ctx context.Context, req model.CreateStudentRequest, defaultPasswordHash string) (*model.Student, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, helper.Internal(err)
+	}
+	defer tx.Rollback(ctx)
 
-	if req.NIM != nil {
-		setParts = append(setParts, fmt.Sprintf("nim = $%d", argNumber))
-		args = append(args, *req.NIM)
-		argNumber++
+	// 1. Check duplicate email in users
+	var existingUserID int
+	err = tx.QueryRow(ctx, "SELECT id FROM users WHERE LOWER(email) = LOWER($1)", req.Email).Scan(&existingUserID)
+	if err == nil {
+		return nil, helper.ValidationField("email", "Email sudah terdaftar")
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, helper.Internal(err)
 	}
 
-	if req.Name != nil {
-		setParts = append(setParts, fmt.Sprintf("name = $%d", argNumber))
-		args = append(args, *req.Name)
-		argNumber++
+	// 2. Check duplicate NIM in students
+	var existingStudentID int
+	err = tx.QueryRow(ctx, "SELECT id FROM students WHERE nim = $1", req.NIM).Scan(&existingStudentID)
+	if err == nil {
+		return nil, helper.ValidationField("nim", "NIM sudah terdaftar")
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, helper.Internal(err)
 	}
 
-	if req.Grade != nil {
-		setParts = append(setParts, fmt.Sprintf("grade = $%d", argNumber))
-		args = append(args, *req.Grade)
-		argNumber++
+	// 3. Create user record (role mahasiswa, default password = hashed NIM)
+	var userID int
+	err = tx.QueryRow(ctx, `
+		INSERT INTO users (username, email, password, role, is_active)
+		VALUES ($1, $2, $3, 'mahasiswa', true)
+		RETURNING id
+	`, req.NIM, req.Email, defaultPasswordHash).Scan(&userID)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			if strings.Contains(pgErr.ConstraintName, "email") {
+				return nil, helper.ValidationField("email", "Email sudah terdaftar")
+			}
+			return nil, helper.ValidationField("nim", "NIM sudah terdaftar")
+		}
+		return nil, helper.Internal(err)
 	}
 
-	if req.IsActive != nil {
-		setParts = append(setParts, fmt.Sprintf("is_active = $%d", argNumber))
-		args = append(args, *req.IsActive)
-		argNumber++
+	// 4. Create student record
+	ipk := 0.00
+	if req.IPKTerakhir != nil {
+		ipk = *req.IPKTerakhir
 	}
 
-	if len(setParts) == 0 {
-		return model.Student{}, fmt.Errorf("no fields to update")
+	var s model.Student
+	err = tx.QueryRow(ctx, `
+		INSERT INTO students (user_id, nim, nama, prodi, angkatan, ipk_terakhir)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, user_id, nim, nama, prodi, angkatan, ipk_terakhir, created_at
+	`, userID, req.NIM, req.Nama, req.Prodi, req.Angkatan, ipk).Scan(
+		&s.ID,
+		&s.UserID,
+		&s.NIM,
+		&s.Nama,
+		&s.Prodi,
+		&s.Angkatan,
+		&s.IPKTerakhir,
+		&s.CreatedAt,
+	)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return nil, helper.ValidationField("nim", "NIM sudah terdaftar")
+		}
+		return nil, helper.Internal(err)
 	}
 
-	args = append(args, id)
+	if err := tx.Commit(ctx); err != nil {
+		return nil, helper.Internal(err)
+	}
+
+	return &s, nil
+}
+
+func (r *StudentRepository) Update(ctx context.Context, id int, req model.UpdateStudentRequest) (*model.Student, error) {
+	ipkClause := "ipk_terakhir"
+	args := []interface{}{req.Nama, req.Prodi, req.Angkatan, id}
+	if req.IPKTerakhir != nil {
+		ipkClause = "$5"
+		args = []interface{}{req.Nama, req.Prodi, req.Angkatan, id, *req.IPKTerakhir}
+	}
 
 	query := fmt.Sprintf(`
 		UPDATE students
-		SET %s
-		WHERE id = $%d
-		RETURNING id, nim, name, grade, is_active, COALESCE(owner_id, 0)
-	`, strings.Join(setParts, ", "), argNumber)
+		SET nama = $1, prodi = $2, angkatan = $3, ipk_terakhir = %s
+		WHERE id = $4 AND deleted_at IS NULL
+		RETURNING id, COALESCE(user_id, 0), nim, nama, prodi, angkatan, COALESCE(ipk_terakhir, 0.00), deleted_at, created_at
+	`, ipkClause)
 
-	var student model.Student
+	var s model.Student
 	err := r.db.QueryRow(ctx, query, args...).Scan(
-		&student.ID,
-		&student.NIM,
-		&student.Name,
-		&student.Grade,
-		&student.IsActive,
-		&student.OwnerID,
+		&s.ID,
+		&s.UserID,
+		&s.NIM,
+		&s.Nama,
+		&s.Prodi,
+		&s.Angkatan,
+		&s.IPKTerakhir,
+		&s.DeletedAt,
+		&s.CreatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return model.Student{}, ErrNotFound
+			return nil, helper.NotFound("data mahasiswa tidak ditemukan atau sudah dihapus")
 		}
-		if strings.Contains(err.Error(), "students_nim_key") {
-			return model.Student{}, ErrDuplicate
-		}
-		return model.Student{}, err
+		return nil, helper.Internal(err)
 	}
-	return student, nil
+	return &s, nil
 }
 
-func (r *studentRepository) Delete(ctx context.Context, id int) (bool, error) {
-	result, err := r.db.Exec(
-		ctx,
-		"DELETE FROM students WHERE id = $1",
-		id,
-	)
+func (r *StudentRepository) SoftDelete(ctx context.Context, id int) error {
+	result, err := r.db.Exec(ctx, `
+		UPDATE students
+		SET deleted_at = NOW()
+		WHERE id = $1 AND deleted_at IS NULL
+	`, id)
 	if err != nil {
-		return false, err
+		return helper.Internal(err)
 	}
-	return result.RowsAffected() > 0, nil
+	if result.RowsAffected() == 0 {
+		return helper.NotFound("data mahasiswa tidak ditemukan atau sudah dihapus")
+	}
+	return nil
+}
+
+func (r *StudentRepository) GetEnrolledCourses(ctx context.Context, studentID int) ([]model.EnrolledCourseItem, int, error) {
+	query := `
+		SELECT e.id, c.id, c.kode_mk, c.nama_mk, c.sks, c.semester, e.tahun_akademik
+		FROM enrollments e
+		JOIN courses c ON c.id = e.course_id
+		WHERE e.student_id = $1
+		ORDER BY c.semester ASC, c.kode_mk ASC
+	`
+	rows, err := r.db.Query(ctx, query, studentID)
+	if err != nil {
+		return nil, 0, helper.Internal(err)
+	}
+	defer rows.Close()
+
+	items := make([]model.EnrolledCourseItem, 0)
+	totalSKS := 0
+	for rows.Next() {
+		var item model.EnrolledCourseItem
+		err := rows.Scan(
+			&item.EnrollmentID,
+			&item.CourseID,
+			&item.KodeMK,
+			&item.NamaMK,
+			&item.SKS,
+			&item.Semester,
+			&item.TahunAkademik,
+		)
+		if err != nil {
+			return nil, 0, helper.Internal(err)
+		}
+		totalSKS += item.SKS
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, helper.Internal(err)
+	}
+	return items, totalSKS, nil
 }

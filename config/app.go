@@ -17,17 +17,15 @@ import (
 func NewApp(
 	db *pgxpool.Pool,
 	studentService *service.StudentService,
-	prestasiService *service.PrestasiService,
+	courseService *service.CourseService,
+	enrollmentService *service.EnrollmentService,
 	authService *service.AuthService,
-	userService *service.UserService,
 	jwtManager *helper.JWTManager,
-	permissions *helper.PermissionSet,
 	logger *slog.Logger,
 ) *fiber.App {
 
 	app := fiber.New(fiber.Config{
 		BodyLimit: 1 * 1024 * 1024, // 1 MB
-
 		ErrorHandler: newErrorHandler(logger),
 	})
 
@@ -37,11 +35,10 @@ func NewApp(
 		app,
 		db,
 		studentService,
-		prestasiService,
+		courseService,
+		enrollmentService,
 		authService,
-		userService,
 		jwtManager,
-		permissions,
 	)
 	app.Use(func(c *fiber.Ctx) error { return helper.NotFound("endpoint tidak ditemukan") })
 
@@ -65,6 +62,18 @@ func newErrorHandler(logger *slog.Logger) fiber.ErrorHandler {
 		} else {
 			logger.Warn("request_rejected", slog.String("request_id", requestID), slog.String("code", appErr.Code), slog.Int("status", appErr.Status))
 		}
-		return c.Status(appErr.Status).JSON(model.ErrorResponse{Success: false, Code: appErr.Code, Message: appErr.Message, Fields: appErr.Fields, RequestID: requestID})
+		resp := model.ErrorResponse{
+			Success:   false,
+			Message:   appErr.Message,
+			Errors:    appErr.Errors,
+			RequestID: requestID,
+		}
+		if resp.Errors == nil && len(appErr.Fields) > 0 {
+			resp.Errors = make(map[string][]string)
+			for k, v := range appErr.Fields {
+				resp.Errors[k] = []string{v}
+			}
+		}
+		return c.Status(appErr.Status).JSON(resp)
 	}
 }

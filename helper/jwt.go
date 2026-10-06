@@ -18,6 +18,7 @@ var (
 
 type accessClaims struct {
 	Username string `json:"username"`
+	Email    string `json:"email"`
 	Role     string `json:"role"`
 	jwt.RegisteredClaims
 }
@@ -52,6 +53,7 @@ func (m *JWTManager) GenerateAccess(
 
 	claims := accessClaims{
 		Username: user.Username,
+		Email:    user.Email,
 		Role:     user.Role,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   strconv.Itoa(user.ID),

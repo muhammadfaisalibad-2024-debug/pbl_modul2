@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"log/slog"
 	"os"
 	"os/signal"
 	"strconv"
@@ -61,33 +60,24 @@ func main() {
 	// REPOSITORIES
 	// ==============================
 
-	studentRepo := repository.NewStudentRepository(db)
-	prestasiRepo := repository.NewPrestasiRepository(db)
 	userRepo := repository.NewUserRepository(db)
+	studentRepo := repository.NewStudentRepository(db)
+	courseRepo := repository.NewCourseRepository(db)
+	enrollmentRepo := repository.NewEnrollmentRepository(db)
 	tokenRepo := repository.NewTokenRepository(db)
-	roleRepo := repository.NewRoleRepository(db)
-
-	rawPermissions, err := roleRepo.LoadPermissions(context.Background())
-	if err != nil {
-		logger.Error("gagal memuat permission", slog.String("error", err.Error()))
-		os.Exit(1)
-	}
-	permissions := helper.NewPermissionSet(rawPermissions)
-	logger.Info("permission dimuat", slog.Any("roles", permissions.KnownRoles()))
 
 	// ==============================
 	// SERVICES
 	// ==============================
 
-	studentService := service.NewStudentService(studentRepo, permissions)
-	prestasiService := service.NewPrestasiService(studentRepo, prestasiRepo)
-	userService := service.NewUserService(userRepo, permissions)
-
+	studentService := service.NewStudentService(studentRepo)
+	courseService := service.NewCourseService(courseRepo)
+	enrollmentService := service.NewEnrollmentService(enrollmentRepo, studentRepo)
 	authService := service.NewAuthService(
 		userRepo,
+		studentRepo,
 		tokenRepo,
 		jwtManager,
-		permissions,
 		time.Duration(refreshDays)*24*time.Hour,
 	)
 
@@ -98,11 +88,10 @@ func main() {
 	app := config.NewApp(
 		db,
 		studentService,
-		prestasiService,
+		courseService,
+		enrollmentService,
 		authService,
-		userService,
 		jwtManager,
-		permissions,
 		logger,
 	)
 
@@ -124,7 +113,7 @@ func main() {
 
 	go func() {
 		fmt.Printf(
-			"Server berjalan di http://localhost:%s\n",
+			"SIAKAD Mini API Server berjalan di http://localhost:%s\n",
 			port,
 		)
 

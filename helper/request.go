@@ -7,29 +7,32 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-func ParseListQuery(c *fiber.Ctx) model.ListQuery {
+func ParseListQuery(c *fiber.Ctx) model.StudentListQuery {
 	page := c.QueryInt("page", 1)
-	limit := c.QueryInt("limit", 10)
+	perPage := c.QueryInt("per_page", 10)
 
 	if page < 1 {
 		page = 1
 	}
 
-	if limit < 1 {
-		limit = 10
+	if perPage < 1 {
+		perPage = 10
+	}
+	if perPage > 50 {
+		perPage = 50
 	}
 
-	search := strings.ToLower(c.Query("search"))
-	sortBy := c.Query("sort", "id")
-	order := strings.ToLower(c.Query("order", "asc"))
-	active := c.Query("is_active")
+	search := strings.TrimSpace(c.Query("search"))
+	sort := c.Query("sort", "nama")
+	prodi := c.Query("prodi")
+	angkatan := c.QueryInt("angkatan", 0)
 
-	return model.ListQuery{
+	return model.StudentListQuery{
 		Page:     page,
-		Limit:    limit,
+		PerPage:  perPage,
 		Search:   search,
-		SortBy:   sortBy,
-		Order:    order,
-		IsActive: active,
+		Sort:     sort,
+		Prodi:    prodi,
+		Angkatan: angkatan,
 	}
 }

@@ -53,7 +53,15 @@ func RandomToken(numBytes int) (string, error) {
 	return hex.EncodeToString(buf), nil
 }
 
+func GenerateSecureToken() (string, error) {
+	return RandomToken(32)
+}
+
 func SHA256Hex(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
+}
+
+func HashToken(token string) string {
+	return SHA256Hex(token)
 }
