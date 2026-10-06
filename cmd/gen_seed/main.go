@@ -46,10 +46,19 @@ func main() {
 	// Admin
 	adminHash, _ := bcrypt.GenerateFromPassword([]byte("Admin123!"), 10)
 	fmt.Fprintln(f, "-- 2. Admin User (Password: Admin123!)")
-	fmt.Fprintf(f, `INSERT INTO users (username, email, password, role, is_active)
-VALUES ('admin_siakad', 'admin@siakad.ac.id', '%s', 'admin', true)
-ON CONFLICT (email) DO UPDATE SET password = EXCLUDED.password, role = 'admin';
-`, string(adminHash))
+	fmt.Fprintf(f, `DO $$
+DECLARE
+    v_admin_id INTEGER;
+BEGIN
+    SELECT id INTO v_admin_id FROM users WHERE email = 'admin@siakad.ac.id';
+    IF v_admin_id IS NULL THEN
+        INSERT INTO users (username, email, password, role, is_active)
+        VALUES ('admin_siakad', 'admin@siakad.ac.id', '%s', 'admin', true);
+    ELSE
+        UPDATE users SET password = '%s', role = 'admin', is_active = true WHERE id = v_admin_id;
+    END IF;
+END $$;
+`, string(adminHash), string(adminHash))
 	fmt.Fprintln(f)
 
 	// Mahasiswa 20
@@ -82,27 +91,35 @@ ON CONFLICT (email) DO UPDATE SET password = EXCLUDED.password, role = 'admin';
 		fmt.Fprintf(f, `DO $$
 DECLARE
     v_user_id INTEGER;
+    v_student_id INTEGER;
 BEGIN
-    INSERT INTO users (username, email, password, role, is_active)
-    VALUES ('%s', '%s', '%s', 'mahasiswa', true)
-    ON CONFLICT (email) DO UPDATE SET password = EXCLUDED.password, role = 'mahasiswa'
-    RETURNING id INTO v_user_id;
-
+    SELECT id INTO v_user_id FROM users WHERE email = '%s';
     IF v_user_id IS NULL THEN
-        SELECT id INTO v_user_id FROM users WHERE email = '%s';
+        INSERT INTO users (username, email, password, role, is_active)
+        VALUES ('%s', '%s', '%s', 'mahasiswa', true)
+        RETURNING id INTO v_user_id;
+    ELSE
+        UPDATE users SET password = '%s', role = 'mahasiswa', is_active = true WHERE id = v_user_id;
     END IF;
 
-    INSERT INTO students (user_id, nim, nama, prodi, angkatan, ipk_terakhir)
-    VALUES (v_user_id, '%s', '%s', '%s', %d, %.2f)
-    ON CONFLICT (nim) DO UPDATE SET
-        user_id = EXCLUDED.user_id,
-        nama = EXCLUDED.nama,
-        prodi = EXCLUDED.prodi,
-        angkatan = EXCLUDED.angkatan,
-        ipk_terakhir = EXCLUDED.ipk_terakhir,
-        deleted_at = NULL;
+    SELECT id INTO v_student_id FROM students WHERE nim = '%s';
+    IF v_student_id IS NULL THEN
+        INSERT INTO students (user_id, nim, nama, name, grade, prodi, angkatan, ipk_terakhir)
+        VALUES (v_user_id, '%s', '%s', '%s', %.2f, '%s', %d, %.2f);
+    ELSE
+        UPDATE students SET
+            user_id = v_user_id,
+            nama = '%s',
+            name = '%s',
+            grade = %.2f,
+            prodi = '%s',
+            angkatan = %d,
+            ipk_terakhir = %.2f,
+            deleted_at = NULL
+        WHERE id = v_student_id;
+    END IF;
 END $$;
-`, s.NIM, s.Email, string(hash), s.Email, s.NIM, s.Nama, s.Prodi, s.Angkatan, s.IPKTerakhir)
+`, s.Email, s.NIM, s.Email, string(hash), string(hash), s.NIM, s.NIM, s.Nama, s.Nama, s.IPKTerakhir, s.Prodi, s.Angkatan, s.IPKTerakhir, s.Nama, s.Nama, s.IPKTerakhir, s.Prodi, s.Angkatan, s.IPKTerakhir)
 	}
 	fmt.Fprintln(f)
 
@@ -122,14 +139,24 @@ END $$;
 
 	fmt.Fprintln(f, "-- 4. 10 Mata Kuliah")
 	for _, c := range courses {
-		fmt.Fprintf(f, `INSERT INTO courses (kode_mk, nama_mk, sks, semester, kuota)
-VALUES ('%s', '%s', %d, %d, %d)
-ON CONFLICT (kode_mk) DO UPDATE SET
-    nama_mk = EXCLUDED.nama_mk,
-    sks = EXCLUDED.sks,
-    semester = EXCLUDED.semester,
-    kuota = EXCLUDED.kuota;
-`, c.KodeMK, c.NamaMK, c.SKS, c.Semester, c.Kuota)
+		fmt.Fprintf(f, `DO $$
+DECLARE
+    v_course_id INTEGER;
+BEGIN
+    SELECT id INTO v_course_id FROM courses WHERE kode_mk = '%s';
+    IF v_course_id IS NULL THEN
+        INSERT INTO courses (kode_mk, nama_mk, sks, semester, kuota)
+        VALUES ('%s', '%s', %d, %d, %d);
+    ELSE
+        UPDATE courses SET
+            nama_mk = '%s',
+            sks = %d,
+            semester = %d,
+            kuota = %d
+        WHERE id = v_course_id;
+    END IF;
+END $$;
+`, c.KodeMK, c.KodeMK, c.NamaMK, c.SKS, c.Semester, c.Kuota, c.NamaMK, c.SKS, c.Semester, c.Kuota)
 	}
 
 	fmt.Fprintln(f)

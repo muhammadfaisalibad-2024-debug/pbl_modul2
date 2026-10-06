@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"api-students/config"
@@ -39,6 +40,10 @@ func NewDBPool(cfg config.Config) (*pgxpool.Pool, error) {
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
 		return nil, err
+	}
+
+	if err := AutoMigrateAndSeed(pool); err != nil {
+		log.Printf("Warning during AutoMigrateAndSeed: %v", err)
 	}
 
 	return pool, nil

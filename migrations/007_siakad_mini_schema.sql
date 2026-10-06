@@ -33,8 +33,9 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'students' AND column_name = 'nama') THEN
         ALTER TABLE students ADD COLUMN nama VARCHAR(120);
         UPDATE students SET nama = name WHERE nama IS NULL AND name IS NOT NULL;
-        ALTER TABLE students ALTER COLUMN nama SET NOT NULL;
     END IF;
+    ALTER TABLE students ALTER COLUMN name DROP NOT NULL;
+    ALTER TABLE students ALTER COLUMN grade DROP NOT NULL;
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'students' AND column_name = 'prodi') THEN
         ALTER TABLE students ADD COLUMN prodi VARCHAR(100) NOT NULL DEFAULT 'Sistem Informasi';
     END IF;
@@ -43,7 +44,7 @@ BEGIN
     END IF;
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'students' AND column_name = 'ipk_terakhir') THEN
         ALTER TABLE students ADD COLUMN ipk_terakhir NUMERIC(3,2) DEFAULT 0.00;
-        UPDATE students SET ipk_terakhir = grade WHERE ipk_terakhir = 0.00 AND grade IS NOT NULL;
+        UPDATE students SET ipk_terakhir = CASE WHEN grade <= 4.0 THEN grade ELSE 3.50 END WHERE ipk_terakhir = 0.00 AND grade IS NOT NULL;
     END IF;
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'students' AND column_name = 'deleted_at') THEN
         ALTER TABLE students ADD COLUMN deleted_at TIMESTAMPTZ;
