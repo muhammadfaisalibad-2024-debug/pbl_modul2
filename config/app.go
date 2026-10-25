@@ -5,41 +5,24 @@ import (
 	"log/slog"
 
 	"api-students/app/model"
-	"api-students/app/service"
 	"api-students/helper"
 	"api-students/middleware"
 	"api-students/route"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func NewApp(
-	db *pgxpool.Pool,
-	studentService *service.StudentService,
-	courseService *service.CourseService,
-	enrollmentService *service.EnrollmentService,
-	authService *service.AuthService,
-	jwtManager *helper.JWTManager,
 	logger *slog.Logger,
+	deps route.Dependencies,
 ) *fiber.App {
-
 	app := fiber.New(fiber.Config{
-		BodyLimit: 1 * 1024 * 1024, // 1 MB
+		BodyLimit:    1 * 1024 * 1024, // 1 MB
 		ErrorHandler: newErrorHandler(logger),
 	})
 
 	middleware.SetupMiddlewares(app, logger)
-
-	route.RegisterRoutes(
-		app,
-		db,
-		studentService,
-		courseService,
-		enrollmentService,
-		authService,
-		jwtManager,
-	)
+	route.RegisterRoutes(app, deps)
 	app.Use(func(c *fiber.Ctx) error { return helper.NotFound("endpoint tidak ditemukan") })
 
 	return app
