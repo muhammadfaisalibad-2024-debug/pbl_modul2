@@ -31,7 +31,10 @@ func SuccessCursor(c *fiber.Ctx, message string, data interface{}, meta model.Cu
 	})
 }
 
-func Created(c *fiber.Ctx, message string, data interface{}) error {
+func Created(c *fiber.Ctx, message string, data interface{}, location ...string) error {
+	if len(location) > 0 && location[0] != "" {
+		c.Set("Location", location[0])
+	}
 	return c.Status(fiber.StatusCreated).JSON(model.WebResponse{
 		Success: true,
 		Message: message,

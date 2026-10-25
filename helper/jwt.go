@@ -45,6 +45,15 @@ func (m *JWTManager) AccessTTL() time.Duration {
 	return m.accessTTL
 }
 
+func (m *JWTManager) GenerateAccessToken(u model.AuthUser) (string, error) {
+	return m.GenerateAccess(model.User{
+		ID:       u.UserID,
+		Username: u.Username,
+		Email:    u.Email,
+		Role:     u.Role,
+	})
+}
+
 func (m *JWTManager) GenerateAccess(
 	user model.User,
 ) (string, error) {

@@ -58,6 +58,14 @@ func Conflict(message string) *AppError {
 	return &AppError{Status: fiber.StatusConflict, Code: CodeConflict, Message: message}
 }
 
+func ServiceUnavailable(message string) *AppError {
+	return &AppError{Status: fiber.StatusServiceUnavailable, Code: "SERVICE_UNAVAILABLE", Message: message}
+}
+
+func NewError(status int, code, message string) *AppError {
+	return &AppError{Status: status, Code: code, Message: message}
+}
+
 func Validation(fields map[string]string) *AppError {
 	errMap := make(map[string][]string)
 	for k, v := range fields {

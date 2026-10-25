@@ -1,11 +1,25 @@
 package helper
 
 import (
+	"strconv"
 	"strings"
 
 	"api-students/app/model"
 	"github.com/gofiber/fiber/v2"
 )
+
+func ParamID(c *fiber.Ctx, name ...string) (int, bool) {
+	paramName := "id"
+	if len(name) > 0 && name[0] != "" {
+		paramName = name[0]
+	}
+	val := c.Params(paramName)
+	id, err := strconv.Atoi(val)
+	if err != nil || id <= 0 {
+		return 0, false
+	}
+	return id, true
+}
 
 func ParseListQuery(c *fiber.Ctx) model.StudentListQuery {
 	page := c.QueryInt("page", 1)
