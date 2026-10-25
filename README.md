@@ -72,7 +72,7 @@ APP_PORT=3000
 DB_HOST=localhost
 DB_PORT=5432
 DB_USER=postgres
-DB_PASSWORD=postgres
+DB_PASSWORD=your_db_password
 DB_NAME=praktikum_backend
 DB_SSLMODE=disable
 DB_MAX_CONNS=10
@@ -81,8 +81,8 @@ DB_MAX_CONNS=10
 MONGO_URI=mongodb://localhost:27017
 MONGO_DATABASE=praktikum_backend
 
-# JWT
-JWT_SECRET=65b458dc012be6c16665db71ee6ec7f53dc9726237bbbd4e7288bacd789955cf
+# JWT (Gunakan string acak aman minimal 32 karakter)
+JWT_SECRET=your_super_secret_jwt_key_change_in_production
 JWT_ISSUER=siakad-mini
 JWT_ACCESS_TTL_MINUTES=15
 JWT_REFRESH_TTL_DAYS=7
