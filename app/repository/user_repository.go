@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"api-students/app/model"
 	"api-students/helper"
@@ -83,4 +84,25 @@ func (r *UserRepository) Create(ctx context.Context, user *model.User) error {
 		return helper.Internal(err)
 	}
 	return nil
+}
+
+func (r *UserRepository) LoadPermissions(ctx context.Context) (*helper.PermissionSet, error) {
+	rows, err := r.db.Query(ctx, "SELECT role_name, permission_name FROM role_permissions")
+	if err != nil {
+		return nil, fmt.Errorf("memuat permission: %w", err)
+	}
+	defer rows.Close()
+
+	raw := make(map[string][]string)
+	for rows.Next() {
+		var role, perm string
+		if err := rows.Scan(&role, &perm); err != nil {
+			return nil, err
+		}
+		raw[role] = append(raw[role], perm)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return helper.NewPermissionSet(raw), nil
 }
