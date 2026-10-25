@@ -16,6 +16,7 @@ import (
 	"api-students/config"
 	"api-students/database"
 	"api-students/helper"
+	"api-students/route"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -36,12 +37,13 @@ func setupTestApp(t *testing.T) (*fiber.App, *pgxpool.Pool, *helper.JWTManager, 
 
 	userRepo := repository.NewUserRepository(db)
 	studentRepo := repository.NewStudentRepository(db)
+	txManager := repository.NewTxManager(db)
 	courseRepo := repository.NewCourseRepository(db)
 	enrollmentRepo := repository.NewEnrollmentRepository(db)
 	tokenRepo := repository.NewTokenRepository(db)
 
 	studentService := service.NewStudentService(studentRepo)
-	courseService := service.NewCourseService(courseRepo)
+	courseService := service.NewCourseService(courseRepo, txManager)
 	enrollmentService := service.NewEnrollmentService(enrollmentRepo, studentRepo)
 	authService := service.NewAuthService(
 		userRepo,
@@ -52,15 +54,14 @@ func setupTestApp(t *testing.T) (*fiber.App, *pgxpool.Pool, *helper.JWTManager, 
 	)
 
 	logger := config.NewLogger()
-	app := config.NewApp(
-		db,
-		studentService,
-		courseService,
-		enrollmentService,
-		authService,
-		jwtManager,
-		logger,
-	)
+	app := config.NewApp(logger, route.Dependencies{
+		Pool:              db,
+		JWT:               jwtManager,
+		StudentService:    studentService,
+		CourseService:     courseService,
+		EnrollmentService: enrollmentService,
+		AuthService:       authService,
+	})
 
 	// Fetch admin and student1 info
 	adminUser, err := userRepo.FindByEmail(context.Background(), "admin@siakad.ac.id")
