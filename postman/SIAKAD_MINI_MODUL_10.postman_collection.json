@@ -1,0 +1,973 @@
+{
+	"info": {
+		"_postman_id": "siakad-mini-modul10-collection",
+		"name": "SIAKAD Mini - Pengujian Modul 10 (MongoDB NoSQL)",
+		"description": "Koleksi Postman lengkap untuk pengujian fitur Modul 10 (MongoDB NoSQL): Portofolio Mahasiswa, Review & Rating Kelas, Agregasi NoSQL, Dual-DB Health Check, dan Pengujian Keamanan/Error (401, 403, 404, 422, NoSQL Injection).",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:3000",
+			"type": "string"
+		},
+		{
+			"key": "admin_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "student1_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "student2_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "student1_id",
+			"value": "1",
+			"type": "string"
+		},
+		{
+			"key": "student2_id",
+			"value": "2",
+			"type": "string"
+		},
+		{
+			"key": "course_id",
+			"value": "1",
+			"type": "string"
+		},
+		{
+			"key": "project_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "review_id",
+			"value": "",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "1.0 Setup & Autentikasi",
+			"item": [
+				{
+					"name": "1.1 GET Health Check (PostgreSQL & MongoDB)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code adalah 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"pm.test(\"Dual-DB aktif dan sukses\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.eql(true);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health",
+							"host": ["{{base_url}}"],
+							"path": ["health"]
+						}
+					}
+				},
+				{
+					"name": "1.2 Login Admin (Simpan Token)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Login Admin Berhasil (200)\", function () {",
+									"    pm.response.to.have.status(200);",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.eql(true);",
+									"    if (jsonData.data && jsonData.data.access_token) {",
+									"        pm.collectionVariables.set(\"admin_token\", jsonData.data.access_token);",
+									"    }",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"admin@siakad.ac.id\",\n  \"password\": \"Admin123!\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/login",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "auth", "login"]
+						}
+					}
+				},
+				{
+					"name": "1.3 Login Mahasiswa 1 (Simpan Token & ID)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Login Mahasiswa 1 Berhasil (200)\", function () {",
+									"    pm.response.to.have.status(200);",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.eql(true);",
+									"    if (jsonData.data && jsonData.data.access_token) {",
+									"        pm.collectionVariables.set(\"student1_token\", jsonData.data.access_token);",
+									"    }",
+									"    if (jsonData.data && jsonData.data.user && jsonData.data.user.id) {",
+									"        pm.collectionVariables.set(\"student1_id\", jsonData.data.user.id.toString());",
+									"    }",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"fajar.hidayat@siakad.ac.id\",\n  \"password\": \"187221000006\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/login",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "auth", "login"]
+						}
+					}
+				},
+				{
+					"name": "1.4 Login Mahasiswa 2 (Simpan Token & ID)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Login Mahasiswa 2 Berhasil (200)\", function () {",
+									"    pm.response.to.have.status(200);",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.eql(true);",
+									"    if (jsonData.data && jsonData.data.access_token) {",
+									"        pm.collectionVariables.set(\"student2_token\", jsonData.data.access_token);",
+									"    }",
+									"    if (jsonData.data && jsonData.data.user && jsonData.data.user.id) {",
+									"        pm.collectionVariables.set(\"student2_id\", jsonData.data.user.id.toString());",
+									"    }",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"gita.gutawa@siakad.ac.id\",\n  \"password\": \"187221000007\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/login",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "auth", "login"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "2.0 Portofolio Mahasiswa (NoSQL MongoDB)",
+			"item": [
+				{
+					"name": "2.1 GET Portofolio Sebelum Dibuat (404 / 200)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code 404 (jika belum ada) atau 200 (jika sudah ada)\", function () {",
+									"    pm.expect(pm.response.code).to.be.oneOf([200, 404]);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{student1_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/students/{{student1_id}}/portfolio",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "students", "{{student1_id}}", "portfolio"]
+						}
+					}
+				},
+				{
+					"name": "2.2 PUT Buat atau Replace Portofolio (200)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Berhasil Simpan Portofolio (200)\", function () {",
+									"    pm.response.to.have.status(200);",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.eql(true);",
+									"    pm.expect(jsonData.data.headline).to.not.be.empty;",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{student1_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"headline\": \"Fullstack Go & Cloud Engineer\",\n  \"bio\": \"Mahasiswa D4 Teknik Informatika UNAIR dengan minat pada sistem terdistribusi, concurrency, dan high-throughput database.\",\n  \"linkedin_url\": \"https://linkedin.com/in/fajar-hidayat\",\n  \"github_url\": \"https://github.com/fajar-hidayat\",\n  \"skills\": [\"Go\", \"MongoDB\", \"PostgreSQL\", \"Fiber\", \"Docker\"],\n  \"projects\": [\n    {\n      \"title\": \"Sistem Informasi Akademik Mini\",\n      \"technologies\": [\"Go\", \"PostgreSQL\", \"Fiber\"],\n      \"url\": \"https://github.com/fajar-hidayat/siakad-mini\",\n      \"year\": 2026\n    }\n  ],\n  \"certificates\": [\n    {\n      \"name\": \"Certified Backend Developer\",\n      \"issuer\": \"Google Cloud Academy\",\n      \"date\": \"2026-03-01\"\n    }\n  ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/students/{{student1_id}}/portfolio",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "students", "{{student1_id}}", "portfolio"]
+						}
+					}
+				},
+				{
+					"name": "2.3 GET Detail Portofolio Mahasiswa (200)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Berhasil Ambil Portofolio Mahasiswa (200)\", function () {",
+									"    pm.response.to.have.status(200);",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.eql(true);",
+									"    pm.expect(jsonData.data.student_id).to.eql(parseInt(pm.collectionVariables.get(\"student1_id\")));",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{student1_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/students/{{student1_id}}/portfolio",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "students", "{{student1_id}}", "portfolio"]
+						}
+					}
+				},
+				{
+					"name": "2.4 POST Tambah Proyek ke Portofolio (201)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Tambah Proyek Berhasil (201)\", function () {",
+									"    pm.response.to.have.status(201);",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.eql(true);",
+									"    if (jsonData.data && jsonData.data.projects && jsonData.data.projects.length > 0) {",
+									"        var lastProj = jsonData.data.projects[jsonData.data.projects.length - 1];",
+									"        pm.collectionVariables.set(\"project_id\", lastProj.id);",
+									"    }",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{student1_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"title\": \"Distributed Cache Layer Redis-Go\",\n  \"technologies\": [\"Redis\", \"Go\", \"MongoDB\"],\n  \"url\": \"https://github.com/fajar-hidayat/cache-layer\",\n  \"year\": 2026\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/students/{{student1_id}}/portfolio/projects",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "students", "{{student1_id}}", "portfolio", "projects"]
+						}
+					}
+				},
+				{
+					"name": "2.5 DELETE Hapus Proyek dari Portofolio (204)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Hapus Proyek Berhasil (204)\", function () {",
+									"    pm.response.to.have.status(204);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{student1_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/students/{{student1_id}}/portfolio/projects/{{project_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "students", "{{student1_id}}", "portfolio", "projects", "{{project_id}}"]
+						}
+					}
+				},
+				{
+					"name": "2.6 GET Agregasi Top Teknologi Portofolio (200)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Ambil Top Teknologi Berhasil (200)\", function () {",
+									"    pm.response.to.have.status(200);",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.eql(true);",
+									"    pm.expect(Array.isArray(jsonData.data)).to.be.true;",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{student1_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/portfolios/stats/technologies",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "portfolios", "stats", "technologies"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "3.0 Ulasan & Rating Kelas (NoSQL MongoDB)",
+			"item": [
+				{
+					"name": "3.1 POST Buat Ulasan Kelas Mahasiswa (201)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Buat Ulasan Berhasil (201)\", function () {",
+									"    pm.response.to.have.status(201);",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.eql(true);",
+									"    if (jsonData.data && jsonData.data.id) {",
+									"        pm.collectionVariables.set(\"review_id\", jsonData.data.id);",
+									"    }",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{student1_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"rating\": 5,\n  \"comment\": \"Mata kuliah ini sangat aplikatif dan memberikan pemahaman mendalam tentang optimasi database dan konkurensi backend.\",\n  \"difficulty\": \"menengah\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/courses/{{course_id}}/reviews",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "courses", "{{course_id}}", "reviews"]
+						}
+					}
+				},
+				{
+					"name": "3.2 GET Daftar Ulasan pada Kelas (200)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Ambil Daftar Ulasan Berhasil (200)\", function () {",
+									"    pm.response.to.have.status(200);",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.eql(true);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{student1_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/courses/{{course_id}}/reviews",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "courses", "{{course_id}}", "reviews"]
+						}
+					}
+				},
+				{
+					"name": "3.3 GET Summary & Agregasi Rating Kelas (200)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Ambil Summary Rating Berhasil (200)\", function () {",
+									"    pm.response.to.have.status(200);",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.eql(true);",
+									"    pm.expect(jsonData.data.average_rating).to.be.a(\"number\");",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{student1_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/courses/{{course_id}}/reviews/summary",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "courses", "{{course_id}}", "reviews", "summary"]
+						}
+					}
+				},
+				{
+					"name": "3.4 GET Detail Ulasan Berdasarkan ID (200)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Ambil Detail Review Berhasil (200)\", function () {",
+									"    pm.response.to.have.status(200);",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.eql(true);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{student1_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/reviews/{{review_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "reviews", "{{review_id}}"]
+						}
+					}
+				},
+				{
+					"name": "3.5 PATCH Update Komentar Ulasan Sendiri (200)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Update Ulasan Berhasil (200)\", function () {",
+									"    pm.response.to.have.status(200);",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.eql(true);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{student1_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"rating\": 5,\n  \"comment\": \"Materi praktikum diperbarui dan sangat relevan dengan kebutuhan industri saat ini.\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/reviews/{{review_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "reviews", "{{review_id}}"]
+						}
+					}
+				},
+				{
+					"name": "3.6 POST Mark Helpful / Vote Ulasan (200)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Helpful Vote Berhasil (200)\", function () {",
+									"    pm.response.to.have.status(200);",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.eql(true);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{student2_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/reviews/{{review_id}}/helpful",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "reviews", "{{review_id}}", "helpful"]
+						}
+					}
+				},
+				{
+					"name": "3.7 POST Balas Ulasan oleh Admin atau Dosen (201)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Balas Ulasan Berhasil (201)\", function () {",
+									"    pm.response.to.have.status(201);",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.eql(true);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"comment\": \"Terima kasih atas ulasannya. Modul praktikum akan terus kami kembangkan.\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/reviews/{{review_id}}/replies",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "reviews", "{{review_id}}", "replies"]
+						}
+					}
+				},
+				{
+					"name": "3.8 DELETE Hapus Ulasan Mahasiswa (204)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Hapus Ulasan Berhasil (204)\", function () {",
+									"    pm.response.to.have.status(204);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{student1_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/reviews/{{review_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "reviews", "{{review_id}}"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "4.0 Error Handling & Keamanan (Modul 10)",
+			"item": [
+				{
+					"name": "4.1 401 Unauthorized - Akses Tanpa Token",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code adalah 401 Unauthorized\", function () {",
+									"    pm.response.to.have.status(401);",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.eql(false);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/students/{{student1_id}}/portfolio",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "students", "{{student1_id}}", "portfolio"]
+						}
+					}
+				},
+				{
+					"name": "4.2 403 Forbidden - Mahasiswa Lain Ubah Portofolio",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code adalah 403 Forbidden\", function () {",
+									"    pm.response.to.have.status(403);",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.eql(false);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{student2_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"headline\": \"Percobaan Pembajakan Portofolio\",\n  \"bio\": \"Hacked bio\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/students/{{student1_id}}/portfolio",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "students", "{{student1_id}}", "portfolio"]
+						}
+					}
+				},
+				{
+					"name": "4.3 404 Not Found - Portofolio Mahasiswa Tidak Ada",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code adalah 404 Not Found\", function () {",
+									"    pm.response.to.have.status(404);",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.eql(false);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/students/99999/portfolio",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "students", "99999", "portfolio"]
+						}
+					}
+				},
+				{
+					"name": "4.4 404 Not Found - Hapus Proyek ID Tidak Ditemukan",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code adalah 404 Not Found\", function () {",
+									"    pm.response.to.have.status(404);",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.eql(false);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{student1_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/students/{{student1_id}}/portfolio/projects/507f1f77bcf86cd799439011",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "students", "{{student1_id}}", "portfolio", "projects", "507f1f77bcf86cd799439011"]
+						}
+					}
+				},
+				{
+					"name": "4.5 422 Validasi Gagal - Headline Terlalu Pendek & Tahun Invalid",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code adalah 422 Unprocessable Entity\", function () {",
+									"    pm.response.to.have.status(422);",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.eql(false);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{student1_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"headline\": \"ab\",\n  \"projects\": [\n    {\n      \"title\": \"X\",\n      \"technologies\": [\"Go\"],\n      \"year\": 1850\n    }\n  ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/students/{{student1_id}}/portfolio",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "students", "{{student1_id}}", "portfolio"]
+						}
+					}
+				},
+				{
+					"name": "4.6 422 Validasi Gagal - Rating Ulasan di Luar 1-5",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code adalah 422 Unprocessable Entity\", function () {",
+									"    pm.response.to.have.status(422);",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.eql(false);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{student1_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"rating\": 10,\n  \"comment\": \"Rating di luar batas 1 sampai 5\",\n  \"difficulty\": \"mudah\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/courses/{{course_id}}/reviews",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "courses", "{{course_id}}", "reviews"]
+						}
+					}
+				},
+				{
+					"name": "4.7 NoSQL Injection Rejection - Operator Mongo ($ne)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"NoSQL Injection Ditolak (422 Unprocessable Entity)\", function () {",
+									"    pm.response.to.have.status(422);",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.eql(false);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{student1_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"headline\": { \"$ne\": \"\" },\n  \"bio\": \"Percobaan NoSQL Injection dengan operator $ne\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/students/{{student1_id}}/portfolio",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "students", "{{student1_id}}", "portfolio"]
+						}
+					}
+				}
+			]
+		}
+	]
+}
