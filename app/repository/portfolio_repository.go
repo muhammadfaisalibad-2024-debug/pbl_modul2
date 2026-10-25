@@ -250,7 +250,7 @@ func (r *portfolioMongoRepository) RemoveProject(ctx context.Context, studentID 
 		return err
 	}
 
-	filter := bson.M{"student_id": studentID}
+	filter := bson.M{"student_id": studentID, "projects._id": oid}
 	update := bson.M{
 		"$pull": bson.M{"projects": bson.M{"_id": oid}},
 		"$set":  bson.M{"updated_at": now()},
@@ -262,9 +262,13 @@ func (r *portfolioMongoRepository) RemoveProject(ctx context.Context, studentID 
 	}
 
 	if res.MatchedCount == 0 {
-		return ErrNotFound
-	}
-	if res.ModifiedCount == 0 {
+		n, err := r.coll.CountDocuments(ctx, bson.M{"student_id": studentID})
+		if err != nil {
+			return fmt.Errorf("memeriksa portofolio: %w", err)
+		}
+		if n == 0 {
+			return ErrNotFound
+		}
 		return ErrProjectNotFound
 	}
 	return nil
