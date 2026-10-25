@@ -1,6 +1,6 @@
-# SIAKAD Mini - RESTful API Back End
+# SIAKAD Mini - Polyglot Persistence RESTful API
 
-RESTful API back end untuk **SIAKAD Mini**, layanan akademik sederhana yang mengelola data mahasiswa, mata kuliah, dan Kartu Rencana Studi (KRS) menggunakan **Go (Golang)**, **Fiber v2**, dan **PostgreSQL**.
+RESTful API back end untuk **SIAKAD Mini**, sistem informasi akademik modern yang menerapkan arsitektur **Polyglot Persistence** (relasional PostgreSQL + dokumen NoSQL MongoDB) menggunakan **Go (Golang)** dan framework **Fiber v2**.
 
 ---
 
@@ -8,123 +8,165 @@ RESTful API back end untuk **SIAKAD Mini**, layanan akademik sederhana yang meng
 
 - **Bahasa**: Go 1.26.5
 - **Framework Web**: Fiber v2 (`github.com/gofiber/fiber/v2`)
-- **Database Driver**: pgx v5 (`github.com/jackc/pgx/v5`) dengan connection pooling
-- **Database**: PostgreSQL
-- **Autentikasi**: JWT (JSON Web Token) dengan Bearer Token
-- **Keamanan Password**: Hash bcrypt
-- **Rate Limiting**: Maksimal 5x gagal login per menit (HTTP 429)
-- **Concurrency Control**: Row Locking (`SELECT ... FOR UPDATE`) pada pengambilan KRS (Enrollments)
-- **Data Seeder**: 1 Admin, 20 Mahasiswa, 10 Mata Kuliah
+- **Database Relasional**: PostgreSQL dengan driver `pgx/v5` (`github.com/jackc/pgx/v5`) & connection pooling
+- **Database NoSQL**: MongoDB dengan official driver v2 (`go.mongodb.org/mongo-driver/v2`)
+- **Arsitektur Persistence**:
+  - **PostgreSQL**: Data relasional inti (Users, Roles, Permissions, Students, Courses, Enrollments, Supervisions).
+  - **MongoDB**: Data fleksibel berbasis dokumen (Portofolio Mahasiswa, Proyek, Sertifikat, dan Ulasan Kelas / Reviews).
+- **Clean Architecture**: Package `app/model` murni domain logic tanpa dependensi BSON/driver MongoDB.
+- **Autentikasi & Otorisasi**: JWT (Bearer Token) + Role-Based Access Control (RBAC) dinamis dari tabel `role_permissions`.
+- **Keamanan**: Hash bcrypt, Rate Limiting login (HTTP 429), penolakan NoSQL injection pada body parser (HTTP 400).
+- **Konkurensi & Integritas**:
+  - PostgreSQL: Row-level locking (`SELECT ... FOR UPDATE`) pada transaksi KRS atomik dan alokasi pembimbing tugas akhir.
+  - MongoDB: Atomik conditional update (`projects.19: {$exists: false}`) untuk pencegahan race condition batas 20 proyek.
 
 ---
 
-## 🗄️ Model Data (Database Schema)
+## 🗄️ Model Data & Penyimpanan
 
-1. **`users`**:
-   - `id` (PK, Serial)
-   - `email` (Unique, Varchar)
-   - `password` (Hash Bcrypt)
-   - `role` (`admin` / `mahasiswa`)
-2. **`students`**:
-   - `id` (PK, Serial)
-   - `user_id` (FK `users.id`, 1-to-1)
-   - `nim` (Unique, 12 digit)
-   - `nama` (Varchar)
-   - `prodi` (Varchar)
-   - `angkatan` (Integer, 4 digit)
-   - `ipk_terakhir` (Numeric 3.2, rentang 0.00–4.00)
-   - `deleted_at` (Timestamptz, soft delete)
-3. **`courses`**:
-   - `id` (PK, Serial)
-   - `kode_mk` (Unique, Varchar)
-   - `nama_mk` (Varchar)
-   - `sks` (Integer)
-   - `semester` (Integer)
-   - `kuota` (Integer)
-4. **`enrollments`**:
-   - `id` (PK, Serial)
-   - `student_id` (FK `students.id`)
-   - `course_id` (FK `courses.id`)
-   - `tahun_akademik` (Varchar, e.g., `2026/2027-Ganjil`)
-   - `created_at` (Timestamptz)
-   - *Constraint Unik*: `(student_id, course_id, tahun_akademik)`
+### 1. PostgreSQL (Relasional)
+1. **`users`**: Akun pengguna (`id`, `username`, `email`, `password`, `role`, `is_active`, `created_at`).
+2. **`roles` & `permissions`**: Pengaturan RBAC (`role_permissions`).
+3. **`students`**: Biodata mahasiswa (`id`, `user_id`, `nim`, `nama`, `prodi`, `angkatan`, `ipk_terakhir`, `deleted_at`).
+4. **`courses`**: Mata kuliah (`id`, `kode_mk`, `nama_mk`, `sks`, `semester`, `kuota`).
+5. **`enrollments`**: Transaksi KRS mahasiswa (`id`, `student_id`, `course_id`, `tahun_akademik`, `created_at`).
+6. **`supervisions`**: Pembimbing Tugas Akhir (`id`, `student_id`, `supervisor_id`, `status`, `assigned_at`).
+
+### 2. MongoDB (NoSQL Dokumen)
+1. **`student_portfolios`**:
+   - `student_id` (Integer, Unique Index: `student_unique`)
+   - `headline`, `bio`, `linkedin_url`, `github_url`, `skills`
+   - `projects` (Embedded Array): `_id` (ObjectID), `title`, `technologies` (Multikey Index: `project_tech`), `url`, `year`
+   - `certificates` (Embedded Array): `_id` (ObjectID), `name`, `issuer`, `date`
+2. **`course_reviews`**:
+   - `course_id` (Integer), `student_id` (Integer), `rating` (1-5), `comment`, `difficulty`, `helpful_count`
+   - `replies` (Embedded Array): tanggapan dari dosen / admin.
 
 ---
 
-## ⚖️ Business Rules
+## ⚖️ Aturan Bisnis (Business Rules)
 
-1. **Batas SKS per Semester berdasarkan IPK Terakhir**:
+1. **Batas SKS berdasarkan IPK Terakhir**:
    - $\text{IPK} \ge 3.00 \rightarrow$ Maksimal **24 SKS**
    - $2.50 \le \text{IPK} < 3.00 \rightarrow$ Maksimal **21 SKS**
    - $\text{IPK} < 2.50 \rightarrow$ Maksimal **18 SKS**
-2. Mahasiswa tidak dapat mengambil mata kuliah yang sama dua kali pada tahun akademik yang sama (HTTP `409 Conflict`).
-3. Mata kuliah yang kuotanya penuh tidak dapat diambil (HTTP `422 Unprocessable Entity`).
-4. Mahasiswa hanya dapat mengakses data dan membatalkan KRS miliknya sendiri (HTTP `403 Forbidden` jika mengakses milik orang lain).
-5. Mahasiswa yang telah di-*soft delete* tidak dapat login (HTTP `401 Unauthorized`) dan tidak muncul di daftar mahasiswa.
+2. **KRS Atomik & Anti-Overbooking**:
+   - Pengecekan kuota dan batas SKS dieksekusi dalam satu transaksi atomik berisolasi tinggi.
+   - Pembatalan KRS mengembalikan kuota secara otomatis.
+3. **Batas Proyek Portofolio (Modul 10)**:
+   - Satu mahasiswa maksimal memiliki **20 proyek**. Penambahan proyek ke-21 ditolak atomik (`409 Conflict`).
+4. **Independensi Layanan (Fault Isolation)**:
+   - Jika MongoDB mati, endpoint akademik inti (Login, Siswa, Kelas, KRS) yang bergantung pada PostgreSQL tetap berjalan normal (**200 OK**). Endpoint `/health` secara transparan melaporkan status **503 Service Unavailable**.
 
 ---
 
-## 🚀 Menjalankan Server
+## 🚀 Panduan Menjalankan Aplikasi
 
-1. **Konfigurasi Environment (`.env`)**:
-   ```env
-   APP_NAME=SIAKAD Mini
-   APP_PORT=3000
+### 1. Konfigurasi Lingkungan (`.env`)
+Salin file `.env.example` menjadi `.env` lalu sesuaikan konfigurasinya:
+```env
+APP_NAME=SIAKAD Mini
+APP_PORT=3000
 
-   DB_HOST=localhost
-   DB_PORT=5432
-   DB_USER=postgres
-   DB_PASSWORD=postgres
-   DB_NAME=praktikum_backend
-   DB_SSLMODE=disable
+# PostgreSQL
+DB_HOST=localhost
+DB_PORT=5432
+DB_USER=postgres
+DB_PASSWORD=postgres
+DB_NAME=praktikum_backend
+DB_SSLMODE=disable
+DB_MAX_CONNS=10
 
-   JWT_SECRET=65b458dc012be6c16665db71ee6ec7f53dc9726237bbbd4e7288bacd789955cf
-   JWT_ISSUER=siakad-mini
-   JWT_ACCESS_TTL_MINUTES=15
-   JWT_REFRESH_TTL_DAYS=7
-   ```
+# MongoDB
+MONGO_URI=mongodb://localhost:27017
+MONGO_DATABASE=praktikum_backend
 
-2. **Jalankan Migrasi & Seeding Data**:
-   ```bash
-   go run cmd/gen_seed/main.go
-   go run cmd/seeder/main.go
-   ```
+# JWT
+JWT_SECRET=65b458dc012be6c16665db71ee6ec7f53dc9726237bbbd4e7288bacd789955cf
+JWT_ISSUER=siakad-mini
+JWT_ACCESS_TTL_MINUTES=15
+JWT_REFRESH_TTL_DAYS=7
+```
 
-3. **Jalankan Aplikasi**:
-   ```bash
-   go run main.go
-   ```
+### 2. Migrasi Database PostgreSQL & Seeding
+```powershell
+# Jalankan migrasi dan seeder awal
+go run cmd/seeder/main.go
+```
 
-4. **Jalankan Unit & Integration Test**:
-   ```bash
-   go test -v ./...
-   ```
-
----
-
-## 📋 Daftar 10 Endpoint RESTful API
-
-| No | Method | Endpoint | Akses | Deskripsi & Status Sukses |
-|---|---|---|---|---|
-| 1 | `POST` | `/api/v1/auth/login` | Publik | Login & mendapatkan JWT Access Token. (`200 OK`) |
-| 2 | `GET` | `/api/v1/auth/me` | Semua Role | Profil user login (+ data student jika mahasiswa). (`200 OK`) |
-| 3 | `GET` | `/api/v1/students` | Admin | Daftar mahasiswa + pagination, filter, search, sort. (`200 OK`) |
-| 4 | `POST` | `/api/v1/students` | Admin | Menambah mahasiswa + akun user (password = hash NIM). (`201 Created`) |
-| 5 | `GET` | `/api/v1/students/:id` | Admin / Mahasiswa (sendiri) | Detail mahasiswa + daftar MK + `total_sks` + `batas_sks`. (`200 OK`) |
-| 6 | `PUT` | `/api/v1/students/:id` | Admin | Update mahasiswa (nama, prodi, angkatan, ipk; NIM tetap). (`200 OK`) |
-| 7 | `DELETE` | `/api/v1/students/:id` | Admin | Soft delete mahasiswa. (`204 No Content`) |
-| 8 | `GET` | `/api/v1/courses` | Semua Role | Daftar mata kuliah + hitung `terisi` & `sisa_kuota`. (`200 OK`) |
-| 9 | `POST` | `/api/v1/enrollments` | Mahasiswa | Ambil MK (KRS) dengan row locking & validasi SKS. (`201 Created`) |
-| 10 | `DELETE` | `/api/v1/enrollments/:id` | Mahasiswa (sendiri) | Batalkan MK dari KRS (kuota kembali bertambah). (`204 No Content`) |
+### 3. Menjalankan Server
+```powershell
+go run main.go
+```
+*Aplikasi akan berjalan pada `http://localhost:3000` dan otomatis menginisialisasi indeks unik MongoDB.*
 
 ---
 
-## 🧑‍💻 Kredensial Akun Default (Seeder)
+## 📋 Daftar Endpoint RESTful API
 
-- **Admin**:
+### 1. Autentikasi & Pemantauan Sistem
+| Method | Endpoint | Akses | Keterangan |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/health` / `/api/v1/health` | Publik | Cek kesehatan koneksi PostgreSQL dan MongoDB |
+| `POST` | `/api/v1/auth/login` | Publik | Login & mendapatkan JWT Access Token |
+| `GET` | `/api/v1/auth/me` | Terautentikasi | Profil pengguna login (+ biodata mahasiswa) |
+| `POST` | `/api/v1/auth/refresh` | Publik | Refresh access token menggunakan refresh token |
+| `POST` | `/api/v1/auth/logout` | Terautentikasi | Logout & pencabutan sesi |
+
+### 2. Mahasiswa & Portofolio (NoSQL MongoDB)
+| Method | Endpoint | Akses | Keterangan |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/students` | Admin | Daftar mahasiswa + pagination, filter prodi/angkatan, search & sort |
+| `POST` | `/api/v1/students` | Admin | Tambah mahasiswa baru + akun user otomatis |
+| `GET` | `/api/v1/students/:id` | Admin / Mahasiswa Sendiri | Detail mahasiswa + status SKS |
+| `PUT` | `/api/v1/students/:id` | Admin | Perbarui biodata mahasiswa |
+| `DELETE` | `/api/v1/students/:id` | Admin | Soft delete mahasiswa (`deleted_at`) |
+| `GET` | `/api/v1/students/:id/portfolio` | Terautentikasi | Mengambil portofolio lengkap dari MongoDB |
+| `PUT` | `/api/v1/students/:id/portfolio` | Pemilik / Admin | Create / Upsert / Replace data portofolio |
+| `POST` | `/api/v1/students/:id/portfolio/projects` | Pemilik / Admin | Tambah proyek baru (atomik, maks 20 proyek) |
+| `DELETE` | `/api/v1/students/:id/portfolio/projects/:projectId` | Pemilik / Admin | Hapus proyek berdasarkan ObjectID |
+| `GET` | `/api/v1/portfolios/stats/technologies` | Terautentikasi | Agregasi agregat Top 10 teknologi proyek mahasiswa |
+
+### 3. Mata Kuliah, KRS (Enrollments), & Reviews
+| Method | Endpoint | Akses | Keterangan |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/courses` | Terautentikasi | Daftar mata kuliah beserta sisa kuota |
+| `GET` | `/api/v1/courses/mine` | Mahasiswa | Daftar mata kuliah yang diambil mahasiswa login |
+| `POST` | `/api/v1/enrollments` | Mahasiswa | Ambil mata kuliah (transaksi atomik PostgreSQL) |
+| `DELETE` | `/api/v1/enrollments/:id` | Mahasiswa | Batalkan KRS (kuota kembali bertambah) |
+| `POST` | `/api/v1/enrollments/swap` | Mahasiswa | Tukar mata kuliah secara atomik dalam satu transaksi |
+| `POST` | `/api/v1/courses/:id/reviews` | Mahasiswa | Beri ulasan dan rating mata kuliah (MongoDB) |
+| `GET` | `/api/v1/courses/:id/reviews` | Terautentikasi | Daftar ulasan pada mata kuliah tertentu |
+| `GET` | `/api/v1/courses/:id/reviews/summary` | Terautentikasi | Agregasi rata-rata rating dan distribusi bintang |
+| `PATCH` | `/api/v1/reviews/:id` | Pemilik | Perbarui komentar/rating ulasan sendiri |
+| `DELETE` | `/api/v1/reviews/:id` | Pemilik / Admin | Hapus ulasan dari MongoDB |
+| `POST` | `/api/v1/reviews/:id/helpful` | Terautentikasi | Vote ulasan bermanfaat |
+| `POST` | `/api/v1/reviews/:id/replies` | Dosen / Admin | Balas ulasan mahasiswa |
+
+### 4. Pembimbing Tugas Akhir (Supervisions)
+| Method | Endpoint | Akses | Keterangan |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/v1/supervisors/:id/assign` | Admin / Permission | Penetapan dosen pembimbing tugas akhir |
+| `PATCH` | `/api/v1/supervisors/:id` | Admin / Permission | Update kuota mahasiswa bimbingan |
+| `POST` | `/api/v1/supervisions/switch` | Admin / Permission | Pengalihan pembimbing tugas akhir |
+
+---
+
+## 🧪 Pengujian & Koleksi Postman
+
+Repository ini menyediakan koleksi pengujian siap pakai di folder `postman/`:
+1. **`postman/SIAKAD_MINI_UTS.postman_collection.json`**: Pengujian komprehensif 10 endpoint relasional (UTS).
+2. **`postman/SIAKAD_MINI_MODUL_10.postman_collection.json`**: Pengujian lengkap fitur NoSQL MongoDB (Portofolio, Ulasan, Agregasi, Kasus Error 401, 403, 404, 422, dan NoSQL Injection).
+
+---
+
+## 🧑‍💻 Kredensial Akun Seeder Standar
+
+- **Administrator**:
   - Email: `admin@siakad.ac.id`
   - Password: `Admin123!`
-- **Mahasiswa (20 akun)**:
-  - Email: `rina.putri@siakad.ac.id` (NIM: `187221000001`, Password: `187221000001`)
-  - Email: `budi.santoso@siakad.ac.id` (NIM: `187221000002`, Password: `187221000002`)
+- **Mahasiswa (20 Akun Seeder)**:
+  - `rina.putri@siakad.ac.id` (NIM: `187221000001`, Password: `187221000001`) — *Student ID: 32*
+  - `budi.santoso@siakad.ac.id` (NIM: `187221000002`, Password: `187221000002`)
+  - `fajar.hidayat@siakad.ac.id` (NIM: `187221000006`, Password: `187221000006`) — *Student ID: 37*
   - ... hingga `taufik.hidayat@siakad.ac.id` (NIM: `187221000020`, Password: `187221000020`)
