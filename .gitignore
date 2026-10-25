@@ -4,3 +4,6 @@ laporan/
 *.pdf
 *.docx
 *.doc
+bukti/
+cmd/test_evidence/
+generate_report.py
