@@ -3,13 +3,21 @@ package model
 import "time"
 
 type Course struct {
-	ID        int       `json:"id"`
-	KodeMK    string    `json:"kode_mk" validate:"required,max=20"`
-	NamaMK    string    `json:"nama_mk" validate:"required,max=120"`
-	SKS       int       `json:"sks" validate:"required,min=1"`
-	Semester  int       `json:"semester" validate:"required,min=1"`
-	Kuota     int       `json:"kuota" validate:"required,gte=0"`
-	CreatedAt time.Time `json:"created_at,omitempty"`
+	ID            int       `json:"id"`
+	Code          string    `json:"code"`
+	Name          string    `json:"name"`
+	Credits       int       `json:"credits"`
+	Quota         int       `json:"quota"`
+	EnrolledCount int       `json:"enrolled_count"`
+	Version       int       `json:"version"`
+	CreatedAt     time.Time `json:"created_at"`
+
+	// Compatibility fields
+	KodeMK   string `json:"kode_mk,omitempty"`
+	NamaMK   string `json:"nama_mk,omitempty"`
+	SKS      int    `json:"sks,omitempty"`
+	Semester int    `json:"semester,omitempty"`
+	Kuota    int    `json:"kuota,omitempty"`
 }
 
 type CourseListItem struct {
@@ -27,4 +35,19 @@ type CourseQuery struct {
 	Semester  int
 	Search    string
 	Available bool
+}
+
+// SwapRequest dipakai endpoint pindah kelas: keluar dari satu kelas dan
+// masuk ke kelas lain sebagai SATU tindakan yang tidak dapat dipecah.
+type SwapRequest struct {
+	FromCourseID int `json:"from_course_id" validate:"required,min=1"`
+	ToCourseID   int `json:"to_course_id" validate:"required,min=1"`
+}
+
+// UpdateQuotaRequest membawa version yang terakhir DILIHAT client.
+// Perubahan hanya diterima bila version itu masih sama dengan yang ada
+// di database — itulah inti optimistic locking.
+type UpdateQuotaRequest struct {
+	Quota   int `json:"quota" validate:"required,min=1,max=500"`
+	Version int `json:"version" validate:"required,min=1"`
 }

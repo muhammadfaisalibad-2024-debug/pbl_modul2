@@ -4,121 +4,238 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"api-students/app/model"
-	"api-students/helper"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type CourseRepository struct {
-	db *pgxpool.Pool
+var (
+	ErrCourseFull       = errors.New("kuota kelas sudah penuh")
+	ErrNotEnrolled      = errors.New("tidak terdaftar di kelas ini")
+	ErrVersionConflict  = errors.New("data sudah diubah pihak lain")
+	ErrQuotaBelowFilled = errors.New("kuota lebih kecil dari jumlah peserta")
+)
+
+type CourseRepository interface {
+	// WithTx mengembalikan salinan repository yang menjalankan seluruh
+	// query-nya di dalam transaction tx.
+	WithTx(tx DBTX) CourseRepository
+	FindAll(ctx context.Context) ([]model.Course, error)
+	FindByID(ctx context.Context, id int) (model.Course, error)
+	FindByStudent(ctx context.Context, userID int) ([]model.Course, error)
+	InsertEnrollment(ctx context.Context, courseID, userID int) error
+	LockStudent(ctx context.Context, userID int) error
+	SumCredits(ctx context.Context, userID int) (int, error)
+	IncrementEnrolled(ctx context.Context, courseID int) (model.Course, error)
+	DecrementEnrolled(ctx context.Context, courseID int) (model.Course, error)
+	DeleteEnrollment(ctx context.Context, courseID, userID int) error
+	LockCourses(ctx context.Context, ids ...int) error
+	UpdateQuota(ctx context.Context, id, quota, version int) (model.Course, error)
+	IsEnrolled(ctx context.Context, courseID, userID int) (bool, error)
 }
 
-func NewCourseRepository(db *pgxpool.Pool) *CourseRepository {
-	return &CourseRepository{db: db}
+const courseColumns = `id, code, name, credits, quota, enrolled_count, version, created_at`
+
+type coursePostgresRepository struct {
+	db DBTX
 }
 
-func (r *CourseRepository) List(ctx context.Context, q model.CourseQuery) ([]model.CourseListItem, error) {
-	var whereClauses []string
-	var args []interface{}
-	argIdx := 1
+// NewCourseRepository menerima DBTX. Pada main.go yang dikirim adalah
+// pool, sehingga repository ini bekerja di luar transaction sampai
+// WithTx dipanggil.
+func NewCourseRepository(db DBTX) CourseRepository {
+	return &coursePostgresRepository{db: db}
+}
 
-	if q.Semester > 0 {
-		whereClauses = append(whereClauses, fmt.Sprintf("c.semester = $%d", argIdx))
-		args = append(args, q.Semester)
-		argIdx++
-	}
+func (r *coursePostgresRepository) WithTx(tx DBTX) CourseRepository {
+	return &coursePostgresRepository{db: tx}
+}
 
-	if q.Search != "" {
-		whereClauses = append(whereClauses, fmt.Sprintf("(c.kode_mk ILIKE '%%' || $%d || '%%' OR c.nama_mk ILIKE '%%' || $%d || '%%')", argIdx, argIdx))
-		args = append(args, q.Search)
-		argIdx++
-	}
+func scanCourse(row pgx.Row) (model.Course, error) {
+	var c model.Course
+	err := row.Scan(&c.ID, &c.Code, &c.Name, &c.Credits, &c.Quota,
+		&c.EnrolledCount, &c.Version, &c.CreatedAt)
+	return c, err
+}
 
-	whereSql := ""
-	if len(whereClauses) > 0 {
-		whereSql = "WHERE " + strings.Join(whereClauses, " AND ")
-	}
-
-	havingSql := ""
-	if q.Available {
-		havingSql = "HAVING COUNT(e.id) < c.kuota"
-	}
-
-	query := fmt.Sprintf(`
-		SELECT 
-			c.id, 
-			c.kode_mk, 
-			c.nama_mk, 
-			c.sks, 
-			c.semester, 
-			c.kuota,
-			COUNT(e.id)::int AS terisi,
-			(c.kuota - COUNT(e.id))::int AS sisa_kuota
-		FROM courses c
-		LEFT JOIN enrollments e ON e.course_id = c.id
-		%s
-		GROUP BY c.id, c.kode_mk, c.nama_mk, c.sks, c.semester, c.kuota
-		%s
-		ORDER BY c.semester ASC, c.kode_mk ASC
-	`, whereSql, havingSql)
-
-	rows, err := r.db.Query(ctx, query, args...)
+func (r *coursePostgresRepository) collect(rows pgx.Rows, err error) ([]model.Course, error) {
 	if err != nil {
-		return nil, helper.Internal(err)
+		return nil, fmt.Errorf("mengambil daftar kelas: %w", err)
 	}
 	defer rows.Close()
 
-	items := make([]model.CourseListItem, 0)
+	result := []model.Course{}
 	for rows.Next() {
-		var item model.CourseListItem
-		err := rows.Scan(
-			&item.ID,
-			&item.KodeMK,
-			&item.NamaMK,
-			&item.SKS,
-			&item.Semester,
-			&item.Kuota,
-			&item.Terisi,
-			&item.SisaKuota,
-		)
+		c, err := scanCourse(rows)
 		if err != nil {
-			return nil, helper.Internal(err)
+			return nil, fmt.Errorf("membaca row kelas: %w", err)
 		}
-		items = append(items, item)
+		result = append(result, c)
 	}
-
-	if err := rows.Err(); err != nil {
-		return nil, helper.Internal(err)
-	}
-
-	return items, nil
+	return result, rows.Err()
 }
 
-func (r *CourseRepository) FindByID(ctx context.Context, id int) (*model.Course, error) {
-	query := `
-		SELECT id, kode_mk, nama_mk, sks, semester, kuota, created_at
-		FROM courses
-		WHERE id = $1
-	`
-	var c model.Course
-	err := r.db.QueryRow(ctx, query, id).Scan(
-		&c.ID,
-		&c.KodeMK,
-		&c.NamaMK,
-		&c.SKS,
-		&c.Semester,
-		&c.Kuota,
-		&c.CreatedAt,
-	)
+func (r *coursePostgresRepository) FindAll(ctx context.Context) ([]model.Course, error) {
+	return r.collect(r.db.Query(ctx,
+		"SELECT "+courseColumns+" FROM courses ORDER BY code"))
+}
+
+func (r *coursePostgresRepository) FindByID(ctx context.Context, id int) (model.Course, error) {
+	c, err := scanCourse(r.db.QueryRow(ctx,
+		"SELECT "+courseColumns+" FROM courses WHERE id = $1", id))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, helper.NotFound("mata kuliah tidak ditemukan")
+			return model.Course{}, ErrNotFound
 		}
-		return nil, helper.Internal(err)
+		return model.Course{}, fmt.Errorf("mengambil kelas: %w", err)
 	}
-	return &c, nil
+	return c, nil
+}
+
+func (r *coursePostgresRepository) FindByStudent(ctx context.Context, userID int) ([]model.Course, error) {
+	return r.collect(r.db.Query(ctx,
+		`SELECT c.id, c.code, c.name, c.credits, c.quota, c.enrolled_count, c.version, c.created_at
+		 FROM courses c
+		 JOIN enrollments e ON e.course_id = c.id
+		 WHERE e.user_id = $1
+		 ORDER BY c.code`, userID))
+}
+
+// LockStudent mengunci row milik satu mahasiswa sampai transaction selesai.
+func (r *coursePostgresRepository) LockStudent(ctx context.Context, userID int) error {
+	var id int
+	err := r.db.QueryRow(ctx,
+		"SELECT id FROM users WHERE id = $1 FOR UPDATE", userID).Scan(&id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("mengunci data mahasiswa: %w", err)
+	}
+	return nil
+}
+
+func (r *coursePostgresRepository) SumCredits(ctx context.Context, userID int) (int, error) {
+	var total int
+	err := r.db.QueryRow(ctx,
+		`SELECT COALESCE(SUM(c.credits), 0)
+		 FROM enrollments e
+		 JOIN courses c ON c.id = e.course_id
+		 WHERE e.user_id = $1`, userID).Scan(&total)
+	if err != nil {
+		return 0, fmt.Errorf("menghitung SKS: %w", err)
+	}
+	return total, nil
+}
+
+// IncrementEnrolled mengambil satu kursi secara ATOMIK.
+func (r *coursePostgresRepository) IncrementEnrolled(ctx context.Context, courseID int) (model.Course, error) {
+	c, err := scanCourse(r.db.QueryRow(ctx,
+		`UPDATE courses SET enrolled_count = enrolled_count + 1
+		 WHERE id = $1 AND enrolled_count < quota
+		 RETURNING `+courseColumns, courseID))
+	if err == nil {
+		return c, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return model.Course{}, fmt.Errorf("menambah peserta: %w", err)
+	}
+	// Tidak ada row yang berubah. Dua kemungkinan: kelasnya tidak ada,
+	// atau kelasnya ada tetapi sudah penuh. Bedakan keduanya.
+	if _, findErr := r.FindByID(ctx, courseID); findErr != nil {
+		return model.Course{}, findErr
+	}
+	return model.Course{}, ErrCourseFull
+}
+
+func (r *coursePostgresRepository) DecrementEnrolled(ctx context.Context, courseID int) (model.Course, error) {
+	c, err := scanCourse(r.db.QueryRow(ctx,
+		`UPDATE courses SET enrolled_count = enrolled_count - 1
+		 WHERE id = $1
+		 RETURNING `+courseColumns, courseID))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return model.Course{}, ErrNotFound
+		}
+		return model.Course{}, fmt.Errorf("mengurangi peserta: %w", err)
+	}
+	return c, nil
+}
+
+func (r *coursePostgresRepository) DeleteEnrollment(ctx context.Context, courseID, userID int) error {
+	cmdTag, err := r.db.Exec(ctx,
+		"DELETE FROM enrollments WHERE course_id = $1 AND user_id = $2", courseID, userID)
+	if err != nil {
+		return fmt.Errorf("menghapus pendaftaran: %w", err)
+	}
+	if cmdTag.RowsAffected() == 0 {
+		return ErrNotEnrolled
+	}
+	return nil
+}
+
+func (r *coursePostgresRepository) LockCourses(ctx context.Context, ids ...int) error {
+	rows, err := r.db.Query(ctx,
+		"SELECT id FROM courses WHERE id = ANY($1) ORDER BY id FOR UPDATE", ids)
+	if err != nil {
+		return fmt.Errorf("mengunci kelas: %w", err)
+	}
+	defer rows.Close()
+
+	found := 0
+	for rows.Next() {
+		found++
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("mengunci kelas: %w", err)
+	}
+	if found != len(ids) {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *coursePostgresRepository) UpdateQuota(ctx context.Context, id, quota, version int) (model.Course, error) {
+	c, err := scanCourse(r.db.QueryRow(ctx,
+		`UPDATE courses SET quota = $1, version = version + 1
+		 WHERE id = $2 AND version = $3 AND $1 >= enrolled_count
+		 RETURNING `+courseColumns, quota, id, version))
+	if err == nil {
+		return c, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return model.Course{}, fmt.Errorf("mengubah kuota: %w", err)
+	}
+	current, findErr := r.FindByID(ctx, id)
+	if findErr != nil {
+		return model.Course{}, findErr
+	}
+	if current.Version != version {
+		return model.Course{}, ErrVersionConflict
+	}
+	return model.Course{}, ErrQuotaBelowFilled
+}
+
+func (r *coursePostgresRepository) IsEnrolled(ctx context.Context, courseID, userID int) (bool, error) {
+	var exists bool
+	err := r.db.QueryRow(ctx,
+		"SELECT EXISTS (SELECT 1 FROM enrollments WHERE course_id = $1 AND user_id = $2)",
+		courseID, userID).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("memeriksa pendaftaran: %w", err)
+	}
+	return exists, nil
+}
+
+func (r *coursePostgresRepository) InsertEnrollment(ctx context.Context, courseID, userID int) error {
+	_, err := r.db.Exec(ctx,
+		"INSERT INTO enrollments (course_id, user_id) VALUES ($1, $2)", courseID, userID)
+	if err != nil {
+		if pgErrorCode(err) == codeUniqueViolation {
+			return ErrDuplicate
+		}
+		return fmt.Errorf("mencatat pendaftaran: %w", err)
+	}
+	return nil
 }
