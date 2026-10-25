@@ -1,3 +1,6 @@
 .env
 logs/
 laporan/
+*.pdf
+*.docx
+*.doc
