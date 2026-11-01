@@ -4,6 +4,7 @@ laporan/
 *.pdf
 *.docx
 *.doc
+*.py
 bukti/
-cmd/test_evidence/
-generate_report.py
+cmd/
+*.exe

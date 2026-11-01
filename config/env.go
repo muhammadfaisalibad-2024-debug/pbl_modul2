@@ -116,3 +116,7 @@ func GetEnvInt(key string, fallback int) int {
 	}
 	return fallback
 }
+
+func LoadEnv() {
+	Load()
+}
