@@ -38,7 +38,7 @@ func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*model.
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, helper.NotFound("user tidak ditemukan")
+			return nil, ErrNotFound
 		}
 		return nil, helper.Internal(err)
 	}
@@ -63,7 +63,7 @@ func (r *UserRepository) FindByID(ctx context.Context, id int) (*model.User, err
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, helper.NotFound("user tidak ditemukan")
+			return nil, ErrNotFound
 		}
 		return nil, helper.Internal(err)
 	}
@@ -84,6 +84,31 @@ func (r *UserRepository) Create(ctx context.Context, user *model.User) error {
 		return helper.Internal(err)
 	}
 	return nil
+}
+
+func (r *UserRepository) FindUsersByCourseID(ctx context.Context, courseID int) ([]model.User, error) {
+	query := `
+		SELECT u.id, u.username, u.email, u.role, u.is_active, u.created_at
+		FROM users u
+		JOIN enrollments e ON e.user_id = u.id
+		WHERE e.course_id = $1 AND u.is_active = true
+		ORDER BY u.id ASC
+	`
+	rows, err := r.db.Query(ctx, query, courseID)
+	if err != nil {
+		return nil, fmt.Errorf("mengambil peserta kelas: %w", err)
+	}
+	defer rows.Close()
+
+	var users []model.User
+	for rows.Next() {
+		var u model.User
+		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.Role, &u.IsActive, &u.CreatedAt); err != nil {
+			return nil, fmt.Errorf("membaca row user: %w", err)
+		}
+		users = append(users, u)
+	}
+	return users, rows.Err()
 }
 
 func (r *UserRepository) LoadPermissions(ctx context.Context) (*helper.PermissionSet, error) {
