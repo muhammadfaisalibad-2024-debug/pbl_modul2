@@ -26,6 +26,7 @@ type Dependencies struct {
 	SupervisorService *service.SupervisorService
 	ReviewService     *service.ReviewService
 	PortfolioService  *service.PortfolioService
+	NotificationService *service.NotificationService
 }
 
 func RegisterRoutes(app *fiber.App, deps Dependencies) {
@@ -135,6 +136,21 @@ func RegisterRoutes(app *fiber.App, deps Dependencies) {
 
 		supervisions := api.Group("/supervisions", middleware.RequireAuth(deps.JWT))
 		supervisions.Post("/switch", deps.SupervisorService.Switch)
+	}
+
+	// ==========================================
+	// 7. NOTIFICATIONS & QUEUE MONITOR (Modul 11)
+	// ==========================================
+	if deps.NotificationService != nil {
+		notifications := api.Group("/notifications",
+			middleware.RequireJSON(),
+			middleware.RequireAuth(deps.JWT))
+		notifications.Get("/mine", deps.NotificationService.Mine)
+
+		admin := api.Group("/admin",
+			middleware.RequireJSON(),
+			middleware.RequireAuth(deps.JWT))
+		admin.Get("/queue", middleware.RequirePermission(deps.Permissions, "queue:monitor"), deps.NotificationService.Monitor)
 	}
 }
 
