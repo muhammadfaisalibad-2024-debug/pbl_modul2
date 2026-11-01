@@ -39,11 +39,12 @@ func setupTestApp(t *testing.T) (*fiber.App, *pgxpool.Pool, *helper.JWTManager, 
 	studentRepo := repository.NewStudentRepository(db)
 	txManager := repository.NewTxManager(db)
 	courseRepo := repository.NewCourseRepository(db)
+	outboxRepo := repository.NewOutboxRepository(db)
 	enrollmentRepo := repository.NewEnrollmentRepository(db)
 	tokenRepo := repository.NewTokenRepository(db)
 
 	studentService := service.NewStudentService(studentRepo)
-	courseService := service.NewCourseService(courseRepo, txManager)
+	courseService := service.NewCourseService(courseRepo, outboxRepo, txManager)
 	enrollmentService := service.NewEnrollmentService(enrollmentRepo, studentRepo)
 	authService := service.NewAuthService(
 		userRepo,
